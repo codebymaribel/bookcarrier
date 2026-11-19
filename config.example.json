@@ -1,0 +1,13 @@
+{
+  "telegramToken": "123456789:REPLACE_WITH_BOTFATHER_TOKEN",
+  "ownerId": 111111111,
+  "kindleUser": "root",
+  "kindleHost": "192.168.1.XXX",
+  "sshKeyPath": "/Users/USER/.ssh/KINDLE_KEY",
+
+  "downloadTimeoutMs": 600000,
+  "uploadTimeoutMs": 120000,
+  "sshConnectTimeoutSec": 10,
+  "kindlePort": 2222,
+  "remotePath": "/mnt/us/documents/books/"
+}
