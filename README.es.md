@@ -285,14 +285,15 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 
 ## Roadmap
 
-| #   | Feature                                                      | Estado          |
-| --- | ------------------------------------------------------------ | --------------- |
-| 1   | Enviar un fic de AO3 desde un link                           | ✅ Hecha        |
-| 2   | Cola de reintentos + arranque al iniciar sesión con launchd  | ✅ Hecha                             |
-| 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)           | ✅ Hecha |
-| 4   | Botón “Seguir” y seguimiento de capítulos                    | Planeada        |
-| 5   | Revisión diaria de capítulos nuevos                          | Planeada        |
-| 6   | Comandos `/list`, `/drop`, `/status`                         | Planeada        |
+| #   | Feature                                                       | Estado          |
+| --- | ------------------------------------------------------------- | --------------- |
+| 1   | Enviar un fic de AO3 desde un link                            | ✅ Hecha        |
+| 2   | Cola de reintentos + arranque al iniciar sesión con launchd   | ✅ Hecha        |
+| 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)            | ✅ Hecha        |
+| 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | 📝 Especificada |
+| 5   | Botón “Seguir” y seguimiento de capítulos                     | Planeada        |
+| 6   | Revisión diaria de capítulos nuevos                           | Planeada        |
+| 7   | Comandos `/list`, `/drop`, `/status`                          | Planeada        |
 
 ## Limitaciones conocidas
 
