@@ -62,8 +62,9 @@ describe("startup restoration (R2.3, R5.3, acceptance 4)", () => {
   it("restores the queue, reconciles the spool and reschedules the timer at the item's time", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: 10 * MIN });
     const item = await persistedItem();
-    await mkdir(join(config.spoolDir, "orphan"), { recursive: true });
-    await writeFile(join(config.spoolDir, "orphan", "x.epub"), "x");
+    const orphan = join(config.spoolDir, "44444444-4444-4444-8444-444444444444");
+    await mkdir(orphan, { recursive: true });
+    await writeFile(join(orphan, "x.epub"), "x");
 
     const upload = vi.fn(async () => {});
     const notify = vi.fn(async () => {});
