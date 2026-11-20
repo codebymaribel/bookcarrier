@@ -2,7 +2,7 @@ import type { Bot } from "grammy";
 import { checkRequiredBinaries } from "./binaries.js";
 import { createBot, notifyOwner, type Send } from "./bot.js";
 import { ConfigError, loadConfig, type ResolvedConfig } from "./config.js";
-import { createDaemon } from "./daemon.js";
+import { createDaemon, pollUntilStopped } from "./daemon.js";
 import { logger } from "./logger.js";
 
 /**
@@ -63,12 +63,7 @@ async function main(): Promise<void> {
     });
   }
 
-  await bot.start({
-    onStart: (info) => {
-      logger.info("bot started, long polling", { username: info.username });
-      daemon.start();
-    },
-  });
+  await pollUntilStopped(bot, daemon, logger);
   logger.info("bot stopped");
 }
 

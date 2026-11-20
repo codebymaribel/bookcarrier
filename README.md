@@ -28,7 +28,7 @@ phone ──share link──▶ Telegram bot ──▶ Bookcarrier (on your Mac)
 | What                                                 | Notes                                                                                                                                             |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | macOS                                                | Developed and tested on macOS (Apple Silicon).                                                                                                    |
-| Node 24                                              | `nvm use` reads `.nvmrc` for development; the LaunchAgent uses Homebrew's `node@24` (`brew install node@24`).                                     |
+| Node 24.15+                                          | `nvm use` reads `.nvmrc` for development; the LaunchAgent uses Homebrew's `node@24` (`brew install node@24`).                                     |
 | [pnpm](https://pnpm.io)                              |                                                                                                                                                   |
 | [FanFicFare](https://github.com/JimmXinu/FanFicFare) | `brew install fanficfare`                                                                                                                         |
 | A Telegram bot                                       | Create one with [@BotFather](https://t.me/BotFather) and keep its token.                                                                          |

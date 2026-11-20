@@ -132,3 +132,28 @@ describe("startup restoration (R2.3, R5.3, acceptance 4)", () => {
     daemon.stop();
   });
 });
+
+describe("pollUntilStopped (R7.1: a crash must end the process so launchd relaunches it)", () => {
+  it("polling dying after start (e.g. a 409) stops the retry timer and rethrows", async () => {
+    const { pollUntilStopped } = await import("../src/daemon.js");
+    const daemon = { start: vi.fn(), stop: vi.fn() };
+    const conflict = new Error("409: Conflict: terminated by other getUpdates request");
+    const bot = {
+      start: vi.fn(async (opts?: { onStart?: (info: { username: string }) => void }) => {
+        opts?.onStart?.({ username: "b" });
+        throw conflict;
+      }),
+    };
+    await expect(pollUntilStopped(bot, daemon, silent())).rejects.toBe(conflict);
+    expect(daemon.start).toHaveBeenCalledTimes(1);
+    expect(daemon.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("a clean stop also stops the retry timer and resolves", async () => {
+    const { pollUntilStopped } = await import("../src/daemon.js");
+    const daemon = { start: vi.fn(), stop: vi.fn() };
+    const bot = { start: vi.fn(async () => {}) };
+    await expect(pollUntilStopped(bot, daemon, silent())).resolves.toBeUndefined();
+    expect(daemon.stop).toHaveBeenCalledTimes(1);
+  });
+});

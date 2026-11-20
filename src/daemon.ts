@@ -91,3 +91,31 @@ export async function createDaemon(config: ResolvedConfig, options: DaemonOption
     stop: () => timer.stop(),
   };
 }
+
+/** The part of grammY's `Bot` that polling needs (injectable for tests). */
+export type Poller = {
+  start(options?: { onStart?: (info: { username: string }) => void }): Promise<void>;
+};
+
+/**
+ * Long-polls until the bot stops, arming the retry timer once polling has started (so the bot can
+ * notify) and ALWAYS cancelling it afterwards. Without the `finally`, a polling failure (a 401, or a
+ * 409 when another instance polls the same bot) would leave the retry timer holding the event loop:
+ * the process would never exit with code 1 and launchd would never relaunch it (R7.1).
+ */
+export async function pollUntilStopped(
+  bot: Poller,
+  daemon: Pick<Daemon, "start" | "stop">,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await bot.start({
+      onStart: (info) => {
+        logger.info("bot started, long polling", { username: info.username });
+        daemon.start();
+      },
+    });
+  } finally {
+    daemon.stop();
+  }
+}
