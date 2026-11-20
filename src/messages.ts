@@ -28,6 +28,22 @@ export const messages = {
   uploadConfig: (detail: string) =>
     `I can't send to the Kindle because of a configuration problem: ${detail}`,
   unexpected: "Something unexpected went wrong. Check the logs.",
+  /** Feature 2, R1.1 + R6.1: a download that failed transiently and was enqueued. */
+  queuedDownload: (detail: string, windowMinutes: number) =>
+    `I couldn't download that fic right now (${detail}). ` +
+    `I'll keep retrying for up to ${windowMinutes} minutes and tell you how it goes.`,
+  /** Feature 2, R1.3 + R6.1: a downloaded fic whose upload failed transiently and was enqueued. */
+  queuedUpload: (title: string, detail: string, windowMinutes: number) =>
+    `I downloaded “${title}” but couldn't send it to your Kindle (${detail}). ` +
+    `I'll keep retrying for up to ${windowMinutes} minutes; it will get there once the Kindle is awake and on the Wi-Fi.`,
+  /** Feature 2, R4.1 + R6.4 */
+  gaveUp: (name: string, lastError: string, windowMinutes: number) =>
+    `I gave up on “${name}” after ${windowMinutes} minutes of retries. Last error: ${lastError}. ` +
+    "Share the link again to try once more.",
+  /** Feature 2, R2.5 */
+  queueFileCorrupt: (backupPath: string) =>
+    "The retry queue file was unreadable, so I started with an empty queue. " +
+    `The old file was kept as ${backupPath} so it can be inspected.`,
 } as const;
 
 /**

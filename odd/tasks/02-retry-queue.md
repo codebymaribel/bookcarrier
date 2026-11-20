@@ -16,15 +16,15 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 
 ## Tasks
 
-- [ ] T1 errors.ts classification — S1 — inline — commit: 
-- [ ] T2 queue/state.ts atomic state — S2 — inline — commit: 
-- [ ] T3 queue/queue.ts adds/removals/backoff — S3, S4 — inline — commit: 
-- [ ] T4 queue/spool.ts — S5 — inline — commit: 
-- [ ] T5 queue/scheduler.ts single timer — S3 — inline — commit: 
-- [ ] T6 downloader to spool + classified errors — S1, S5 — inline — commit: 
-- [ ] T7 uploader failure classification — S1 — inline — commit: 
-- [ ] T8 bot.ts orchestration + notifications — S1, S3, S4, S6 — inline — commit: 
-- [ ] T9 startup restoration in index.ts — S2, S5 — inline — commit: 
+- [x] T1 errors.ts classification — S1 — inline — commit: 6beffa6
+- [x] T2 queue/state.ts atomic state — S2 — inline — commit: 6beffa6
+- [x] T3 queue/queue.ts adds/removals/backoff — S3, S4 — inline — commit: 6beffa6
+- [x] T4 queue/spool.ts — S5 — inline — commit: 6beffa6
+- [x] T5 queue/scheduler.ts single timer — S3 — inline — commit: 6beffa6
+- [x] T6 downloader to spool + classified errors — S1, S5 — inline — commit: (this commit: feat(queue) wire retry queue)
+- [x] T7 uploader failure classification — S1 — inline — commit: (this commit: feat(queue) wire retry queue)
+- [x] T8 bot.ts orchestration + notifications — S1, S3, S4, S6 — inline — commit: (this commit: feat(queue) wire retry queue)
+- [x] T9 startup restoration in index.ts — S2, S5 — inline — commit: (this commit: feat(queue) wire retry queue)
 - [ ] T10 LaunchAgent template plist + docs — S7 — inline — commit: 
 - [ ] T11 binary check at startup + launchctl docs — S7 — inline — commit: 
 - [ ] Manual verification list (tasks.md) — owner, on the real Kindle — pending human
@@ -33,3 +33,4 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 
 - L1: "Realiza la feature 2"
 - L2: Exploration: feature 1 not merged to main; downloader has no 403/429/404 detection yet (only stderr text); FanFicFare needs an empty exclusive outDir, so the spool uses one sub-directory per queue item (`spool/<id>/<file>.epub`).
+- L3: Implementation decisions: spool keeps one directory per item (`spool/<id>/`), so `discard(id)` removes the item's directory; an unrecognized FanFicFare exit is classified transient (the 30-min window bounds the cost); a retry that hits a permanent error is removed and reported; requests and retries share one work chain so AO3 and the Kindle see one operation at a time; a batch that throws re-arms no sooner than 60 s. Config gained `queuePath`, `spoolDir`, `giveUpAfterMs`, `retryBackoffMinutes`. Orchestration of startup lives in `src/daemon.ts`.

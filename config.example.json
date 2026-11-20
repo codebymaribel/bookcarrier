@@ -9,5 +9,10 @@
   "uploadTimeoutMs": 120000,
   "sshConnectTimeoutSec": 10,
   "kindlePort": 2222,
-  "remotePath": "/mnt/us/documents/books/"
+  "remotePath": "/mnt/us/documents/books/",
+
+  "queuePath": "~/.bookcarrier/queue.json",
+  "spoolDir": "~/.bookcarrier/spool",
+  "giveUpAfterMs": 1800000,
+  "retryBackoffMinutes": [1, 2, 4, 8, 15]
 }

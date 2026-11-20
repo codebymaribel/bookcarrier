@@ -1,6 +1,11 @@
 import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
-import { createBot, createRequestHandler, type RequestConfig, type RequestDeps } from "../src/bot.js";
+import {
+  createBot,
+  createPipeline,
+  type PipelineDeps,
+  type RequestConfig,
+} from "../src/bot.js";
 import type { ResolvedConfig } from "../src/config.js";
 import {
   DownloadFailedError,
@@ -9,7 +14,11 @@ import {
 } from "../src/downloader.js";
 import type { Logger } from "../src/logger.js";
 import { messages } from "../src/messages.js";
+import { createQueue, type Queue } from "../src/queue/queue.js";
+import type { QueueItem, QueueState } from "../src/queue/state.js";
 import { UploadConfigError, UploadFailedError } from "../src/uploader.js";
+
+const MIN = 60_000;
 
 const config: RequestConfig = {
   downloadTimeoutMs: 123_000,
@@ -20,72 +29,123 @@ const config: RequestConfig = {
   sshKeyPath: "/keys/kindle",
   kindleUser: "root",
   kindleHost: "192.168.1.50",
+  giveUpAfterMs: 30 * MIN,
+  retryBackoffMinutes: [1, 2, 4, 8, 15],
 };
 
 const LINK = "https://archiveofourown.org/works/65164981";
-const RESULT: DownloadResult = { filePath: "/tmp/bookcarrier-x/65164981-Title.epub", title: "Title" };
+const SPOOL = "/spool";
+const ITEM_DIR = `${SPOOL}/req-1`;
+const RESULT: DownloadResult = { filePath: `${ITEM_DIR}/65164981-Title.epub`, title: "Title" };
+
+const TRANSIENT_DOWNLOAD = new DownloadFailedError(
+  "exit-code",
+  "fanficfare exited with code 1: HTTP Error 429: Too Many Requests",
+  "HTTP Error 429: Too Many Requests",
+);
+const PERMANENT_DOWNLOAD = new DownloadFailedError(
+  "exit-code",
+  "fanficfare exited with code 1: Story does not exist",
+  "StoryDoesNotExist: Story does not exist",
+);
+const UNREACHABLE = new UploadFailedError("exit-code", "scp exited with code 255: Host is down");
+const BROKEN_KEY = new UploadConfigError("key-missing", "SSH key not found: /keys/kindle");
 
 function silentLogger(): Logger {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-/** Fake deps that record the order of everything that happens, in one shared `events` list. */
-function setup(overrides: Partial<RequestDeps> = {}) {
+/**
+ * Fake deps that record the order of everything that happens in one shared `events` list. The queue
+ * is the real one, over an in-memory store, so tests assert on what would be persisted.
+ */
+function setup(overrides: Partial<PipelineDeps> = {}, opts: { initial?: QueueItem[]; now?: () => number } = {}) {
   const events: string[] = [];
   const replies: string[] = [];
+  const notices: string[] = [];
+  const writes: QueueState[] = [];
   const logger = silentLogger();
-  const deps: RequestDeps = {
-    download: vi.fn(async (url: string) => {
-      events.push(`download ${url}`);
+  let ids = 0;
+  const queue: Queue = createQueue({
+    store: {
+      read: async () => ({ state: { version: 1, items: [] } }),
+      write: async (state) => {
+        writes.push(structuredClone(state));
+      },
+    },
+    initial: opts.initial ?? [],
+    backoffMs: config.retryBackoffMinutes.map((m) => m * MIN),
+    giveUpAfterMs: config.giveUpAfterMs,
+    now: opts.now ?? (() => 0),
+  });
+  const deps: PipelineDeps = {
+    download: vi.fn(async (url: string, outDir: string) => {
+      events.push(`download ${url} -> ${outDir}`);
       return RESULT;
     }),
     upload: vi.fn(async (path: string) => {
       events.push(`upload ${path}`);
     }),
-    makeTempDir: vi.fn(async () => {
-      events.push("mkdir");
-      return "/tmp/bookcarrier-x";
-    }),
-    removeDir: vi.fn(async (dir: string) => {
-      events.push(`rmdir ${dir}`);
-    }),
+    spool: {
+      prepare: vi.fn(async (id: string) => {
+        events.push(`prepare ${id}`);
+        return `${SPOOL}/${id}`;
+      }),
+      discard: vi.fn(async (id: string) => {
+        events.push(`discard ${id}`);
+      }),
+    },
+    queue,
+    newId: () => `req-${++ids}`,
     logger,
     ...overrides,
   };
-  const handle = createRequestHandler(config, deps);
+  const pipeline = createPipeline(config, deps);
   const reply = async (text: string) => {
     replies.push(text);
     events.push(`reply ${text}`);
   };
-  return { deps, handle, reply, events, replies, logger };
+  const notify = async (text: string) => {
+    notices.push(text);
+    events.push(`notify ${text}`);
+  };
+  const handle = (text: string) => pipeline.handle(text, reply);
+  return { deps, pipeline, handle, reply, notify, events, replies, notices, writes, logger, queue };
 }
 
-describe("request flow — success (R2.1, R5.4)", () => {
-  it("acknowledges, then calls downloader → uploader in order, then confirms with the title", async () => {
-    const { handle, reply, events } = setup();
-    await handle(LINK, reply);
+const queued = (overrides: Partial<QueueItem>): QueueItem => ({
+  id: "q-1",
+  url: LINK,
+  stage: "upload",
+  epubPath: `${SPOOL}/q-1/65164981-Title.epub`,
+  title: "Title",
+  attempts: 0,
+  firstQueuedAt: 0,
+  nextAttemptAt: 1 * MIN,
+  lastError: "Host is down",
+  ...overrides,
+});
+
+describe("request flow — success (R2.1, R5.4 of feature 1)", () => {
+  it("acknowledges, downloads INTO THE SPOOL, uploads, confirms with the title, then cleans the spool", async () => {
+    const { handle, events, writes } = setup();
+    await handle(LINK);
     expect(events).toEqual([
       `reply ${messages.ack}`,
-      "mkdir",
-      `download ${LINK}`,
+      "prepare req-1",
+      `download ${LINK} -> ${ITEM_DIR}`,
       `upload ${RESULT.filePath}`,
       `reply ${messages.delivered("Title")}`,
-      "rmdir /tmp/bookcarrier-x",
+      "discard req-1",
     ]);
-  });
-
-  it("the delivery message includes the fic's title (R5.4)", async () => {
-    const { handle, reply, replies } = setup();
-    await handle(LINK, reply);
-    expect(replies.at(-1)).toContain("Title");
+    expect(writes).toEqual([]);
   });
 
   it("works with the real Android share text (title line + URL)", async () => {
-    const { handle, reply, deps } = setup();
+    const { handle, deps } = setup();
     await handle(
       "Rio, Rio - carsynmerrill (onthepitch) - Agatha All Along (TV) [Archive of Our Own]\n" +
         "https://archiveofourown.org/works/61265059",
-      reply,
     );
     expect(deps.download).toHaveBeenCalledWith(
       "https://archiveofourown.org/works/61265059",
@@ -96,17 +156,15 @@ describe("request flow — success (R2.1, R5.4)", () => {
 });
 
 describe("request flow — what each step receives", () => {
-  it("the downloader gets the CANONICAL url, not the text the user sent (R2.6)", async () => {
-    const { handle, reply, deps } = setup();
-    await handle(`look: https://www.archiveofourown.org/works/65164981/chapters/9?view_adult=true#top`, reply);
-    expect(deps.download).toHaveBeenCalledWith(LINK, "/tmp/bookcarrier-x", {
-      timeoutMs: 123_000,
-    });
+  it("the downloader gets the CANONICAL url and the item's spool directory", async () => {
+    const { handle, deps } = setup();
+    await handle(`look: https://www.archiveofourown.org/works/65164981/chapters/9?view_adult=true#top`);
+    expect(deps.download).toHaveBeenCalledWith(LINK, ITEM_DIR, { timeoutMs: 123_000 });
   });
 
   it("the uploader gets the downloaded file and the options mapped from config", async () => {
-    const { handle, reply, deps } = setup();
-    await handle(LINK, reply);
+    const { handle, deps } = setup();
+    await handle(LINK);
     expect(deps.upload).toHaveBeenCalledWith(RESULT.filePath, {
       sshKeyPath: "/keys/kindle",
       kindleUser: "root",
@@ -119,160 +177,311 @@ describe("request flow — what each step receives", () => {
   });
 });
 
-describe("request flow — links that are not accepted (R2.2, R2.3)", () => {
+describe("request flow — links that are not accepted", () => {
   it.each(["hello", "https://example.com/works/1", ""])(
     "%j → 'not recognized', no acknowledgement, nothing is run",
     async (text) => {
-      const { handle, reply, replies, deps } = setup();
-      await handle(text, reply);
+      const { handle, replies, deps } = setup();
+      await handle(text);
       expect(replies).toEqual([messages.noLink]);
-      expect(deps.makeTempDir).not.toHaveBeenCalled();
+      expect(deps.spool.prepare).not.toHaveBeenCalled();
       expect(deps.download).not.toHaveBeenCalled();
-      expect(deps.upload).not.toHaveBeenCalled();
     },
   );
 
   it("an AO3 link that is not a work → 'not supported yet', nothing is run", async () => {
-    const { handle, reply, replies, deps } = setup();
-    await handle("https://archiveofourown.org/series/456", reply);
+    const { handle, replies, deps } = setup();
+    await handle("https://archiveofourown.org/series/456");
     expect(replies).toEqual([messages.unsupportedLink]);
     expect(deps.download).not.toHaveBeenCalled();
   });
 });
 
-describe("request flow — failures: the right message, and the next step is not called", () => {
-  it("download failed (R3.3) → download-failed message, uploader NOT called", async () => {
-    const { handle, reply, replies, deps } = setup({
-      download: vi.fn().mockRejectedValue(new DownloadFailedError("exit-code", "fanficfare exited with code 1: HTTP 525")),
+describe("enqueueing (R1, R6.1)", () => {
+  it("transient download failure → enqueued at stage download and notified ONCE (R1.1, R6.1, acceptance 5)", async () => {
+    const { handle, replies, queue, writes, deps } = setup({
+      download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD),
     });
-    await handle(LINK, reply);
-    expect(replies.at(-1)).toBe(messages.downloadFailed("fanficfare exited with code 1: HTTP 525"));
+    await handle(LINK);
+    expect(queue.items()).toEqual([
+      {
+        id: "req-1",
+        url: LINK,
+        stage: "download",
+        attempts: 0,
+        firstQueuedAt: 0,
+        nextAttemptAt: 1 * MIN,
+        lastError: TRANSIENT_DOWNLOAD.message,
+      },
+    ]);
+    expect(writes).toHaveLength(1);
+    expect(replies).toEqual([messages.ack, messages.queuedDownload(TRANSIENT_DOWNLOAD.message, 30)]);
     expect(deps.upload).not.toHaveBeenCalled();
   });
 
-  it("FanFicFare cannot be launched (R3.5) → its own message, naming the binary", async () => {
-    const { handle, reply, replies, deps } = setup({
-      download: vi.fn().mockRejectedValue(new DownloadLaunchError("fanficfare", new Error("spawn fanficfare ENOENT"))),
+  it("permanent download failure → NOT enqueued, the error is reported as in feature 1 (R1.2)", async () => {
+    const { handle, replies, queue, writes, events } = setup({
+      download: vi.fn().mockRejectedValue(PERMANENT_DOWNLOAD),
     });
-    await handle(LINK, reply);
-    const last = replies.at(-1) ?? "";
-    expect(last).toContain("couldn't start FanFicFare");
-    expect(last).toContain('"fanficfare"');
-    expect(last).not.toBe(messages.downloadFailed("x"));
-    expect(deps.upload).not.toHaveBeenCalled();
+    await handle(LINK);
+    expect(queue.items()).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(replies.at(-1)).toBe(messages.downloadFailed(PERMANENT_DOWNLOAD.message));
+    expect(events.at(-1)).toBe("discard req-1");
   });
 
-  it("Kindle unreachable (R5.3, R5.7) → send-failed message with the title", async () => {
-    const { handle, reply, replies } = setup({
-      upload: vi.fn().mockRejectedValue(new UploadFailedError("exit-code", "scp exited with code 255: Host is down")),
+  it("FanFicFare cannot be launched → its own message, not enqueued", async () => {
+    const { handle, replies, queue } = setup({
+      download: vi
+        .fn()
+        .mockRejectedValue(new DownloadLaunchError("fanficfare", new Error("spawn fanficfare ENOENT"))),
     });
-    await handle(LINK, reply);
-    expect(replies.at(-1)).toBe(messages.sendFailed("Title", "scp exited with code 255: Host is down"));
-    expect(replies.at(-1)).toContain("Title");
+    await handle(LINK);
+    expect(replies.at(-1)).toContain("couldn't start FanFicFare");
+    expect(queue.items()).toEqual([]);
   });
 
-  it("broken config (R5.2, R5.5) → configuration message, different from 'unreachable'", async () => {
-    const { handle, reply, replies } = setup({
-      upload: vi.fn().mockRejectedValue(new UploadConfigError("key-missing", "SSH key not found: /keys/kindle")),
-    });
-    await handle(LINK, reply);
-    expect(replies.at(-1)).toBe(messages.uploadConfig("SSH key not found: /keys/kindle"));
-    expect(replies.at(-1)).not.toContain("Wi-Fi");
+  it("transient upload failure → enqueued at stage upload KEEPING the EPUB (R1.3, acceptance 1)", async () => {
+    const { handle, replies, queue, deps } = setup({ upload: vi.fn().mockRejectedValue(UNREACHABLE) });
+    await handle(LINK);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({
+        id: "req-1",
+        stage: "upload",
+        epubPath: RESULT.filePath,
+        title: "Title",
+        lastError: UNREACHABLE.message,
+      }),
+    ]);
+    expect(deps.spool.discard).not.toHaveBeenCalled();
+    expect(replies).toEqual([messages.ack, messages.queuedUpload("Title", UNREACHABLE.message, 30)]);
   });
 
-  it("an unexpected error → generic message with no details, and the real error is logged", async () => {
+  it("permanent upload failure (broken config) → NOT enqueued, configuration message (R1.4, acceptance 6)", async () => {
+    const { handle, replies, queue, deps } = setup({ upload: vi.fn().mockRejectedValue(BROKEN_KEY) });
+    await handle(LINK);
+    expect(queue.items()).toEqual([]);
+    expect(replies.at(-1)).toBe(messages.uploadConfig(BROKEN_KEY.message));
+    expect(deps.spool.discard).toHaveBeenCalledWith("req-1");
+  });
+
+  it("if persisting the enqueue fails, the owner gets the plain failure message and the spool is cleaned", async () => {
+    const { handle, replies, logger, deps } = setup({
+      upload: vi.fn().mockRejectedValue(UNREACHABLE),
+      queue: {
+        enqueue: vi.fn().mockRejectedValue(new Error("ENOSPC")),
+        promoteToUpload: vi.fn(),
+        recordFailure: vi.fn(),
+        remove: vi.fn(),
+      },
+    });
+    await handle(LINK);
+    expect(replies.at(-1)).toBe(messages.sendFailed("Title", UNREACHABLE.message));
+    expect(logger.error).toHaveBeenCalledWith("could not enqueue", expect.anything());
+    expect(deps.spool.discard).toHaveBeenCalledWith("req-1");
+  });
+
+  it("an unexpected error → generic message with no details, logged, not enqueued", async () => {
     const boom = new TypeError("secret internal detail at /Users/x/y.ts:12");
-    const { handle, reply, replies, logger } = setup({ download: vi.fn().mockRejectedValue(boom) });
-    await handle(LINK, reply);
+    const { handle, replies, logger, queue } = setup({ download: vi.fn().mockRejectedValue(boom) });
+    await handle(LINK);
     expect(replies.at(-1)).toBe(messages.unexpected);
-    expect(replies.at(-1)).not.toContain("secret");
+    expect(replies.join("\n")).not.toContain("secret");
     expect(logger.error).toHaveBeenCalledWith("request failed", expect.objectContaining({ error: boom }));
+    expect(queue.items()).toEqual([]);
   });
 
-  it("a failing temp-dir creation → generic message, nothing downloaded", async () => {
-    const { handle, reply, replies, deps } = setup({
-      makeTempDir: vi.fn().mockRejectedValue(new Error("EACCES")),
+  it("a failing spool directory → generic message, nothing downloaded", async () => {
+    const { handle, replies, deps } = setup({
+      spool: { prepare: vi.fn().mockRejectedValue(new Error("EACCES")), discard: vi.fn(async () => {}) },
     });
-    await handle(LINK, reply);
+    await handle(LINK);
     expect(replies.at(-1)).toBe(messages.unexpected);
     expect(deps.download).not.toHaveBeenCalled();
-    expect(deps.removeDir).not.toHaveBeenCalled();
   });
 
   it("the subprocess's stderr goes to the log, never to the owner", async () => {
-    const err = new DownloadFailedError("exit-code", "fanficfare exited with code 1: last line", "Traceback...\nlast line");
-    const { handle, reply, replies, logger } = setup({ download: vi.fn().mockRejectedValue(err) });
-    await handle(LINK, reply);
-    expect(replies.join("\n")).not.toContain("Traceback");
+    const { handle, replies, logger } = setup({ download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) });
+    await handle(LINK);
+    expect(replies.join("\n")).not.toContain("Too Many Requests\n");
     expect(logger.error).toHaveBeenCalledWith(
       "request failed",
-      expect.objectContaining({ stderr: "Traceback...\nlast line" }),
-    );
-  });
-});
-
-describe("request flow — temporary directory", () => {
-  it("is created BEFORE the download and removed after a success", async () => {
-    const { handle, reply, events } = setup();
-    await handle(LINK, reply);
-    expect(events.indexOf("mkdir")).toBeLessThan(events.indexOf(`download ${LINK}`));
-    expect(events.at(-1)).toBe("rmdir /tmp/bookcarrier-x");
-  });
-
-  it("is removed after a failure in the download", async () => {
-    const { handle, reply, deps } = setup({
-      download: vi.fn().mockRejectedValue(new DownloadFailedError("timeout", "timed out")),
-    });
-    await handle(LINK, reply);
-    expect(deps.removeDir).toHaveBeenCalledWith("/tmp/bookcarrier-x");
-  });
-
-  it("is removed after a failure in the upload", async () => {
-    const { handle, reply, deps } = setup({
-      upload: vi.fn().mockRejectedValue(new UploadFailedError("timeout", "timed out")),
-    });
-    await handle(LINK, reply);
-    expect(deps.removeDir).toHaveBeenCalledWith("/tmp/bookcarrier-x");
-  });
-
-  it("is removed even after an unexpected error", async () => {
-    const { handle, reply, deps } = setup({ upload: vi.fn().mockRejectedValue(new Error("bug")) });
-    await handle(LINK, reply);
-    expect(deps.removeDir).toHaveBeenCalledWith("/tmp/bookcarrier-x");
-  });
-
-  it("is removed only after the reply was sent", async () => {
-    const { handle, reply, events } = setup();
-    await handle(LINK, reply);
-    expect(events.indexOf(`reply ${messages.delivered("Title")}`)).toBeLessThan(
-      events.indexOf("rmdir /tmp/bookcarrier-x"),
+      expect.objectContaining({ stderr: TRANSIENT_DOWNLOAD.stderr }),
     );
   });
 
-  it("a failure removing it is logged and does not change the outcome", async () => {
-    const { handle, reply, replies, logger } = setup({
-      removeDir: vi.fn().mockRejectedValue(new Error("EBUSY")),
+  it("a failure cleaning the spool is logged and does not change the outcome", async () => {
+    const { handle, replies, logger } = setup({
+      spool: {
+        prepare: vi.fn(async () => ITEM_DIR),
+        discard: vi.fn().mockRejectedValue(new Error("EBUSY")),
+      },
     });
-    await expect(handle(LINK, reply)).resolves.toBeUndefined();
+    await expect(handle(LINK)).resolves.toBeUndefined();
     expect(replies.at(-1)).toBe(messages.delivered("Title"));
-    expect(logger.warn).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith("could not clean the spool", expect.anything());
   });
 
-  it("is not created when the link is rejected", async () => {
-    const { handle, reply, deps } = setup();
-    await handle("no link here", reply);
-    expect(deps.makeTempDir).not.toHaveBeenCalled();
-    expect(deps.removeDir).not.toHaveBeenCalled();
-  });
-});
-
-describe("request flow — Telegram failures", () => {
   it("if sending a message fails, it is logged and the fic is still delivered", async () => {
-    const { handle, deps, logger } = setup();
+    const { pipeline, deps, logger } = setup();
     const failingReply = vi.fn().mockRejectedValue(new Error("Telegram is down"));
-    await expect(handle(LINK, failingReply)).resolves.toBeUndefined();
+    await expect(pipeline.handle(LINK, failingReply)).resolves.toBeUndefined();
     expect(deps.upload).toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalled();
+  });
+});
+
+describe("retries (R3, R4, R5.2, R6)", () => {
+  it("successful retry of stage upload → only the upload runs, notifies with the title, cleans the spool (R3.1, R6.2, R5.2, acceptance 2)", async () => {
+    const item = queued({});
+    const { pipeline, notify, events, queue, deps } = setup({}, { initial: [item], now: () => 1 * MIN });
+    await pipeline.processDue([item], notify);
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(events).toEqual([
+      `upload ${item.epubPath}`,
+      "discard q-1",
+      `notify ${messages.delivered("Title")}`,
+    ]);
+    expect(queue.items()).toEqual([]);
+  });
+
+  it("failed intermediate retry → no notification, attempts and next time updated (R6.3, R3.3)", async () => {
+    const item = queued({});
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { upload: vi.fn().mockRejectedValue(UNREACHABLE) },
+      { initial: [item], now: () => 1 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(notices).toEqual([]);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({ attempts: 1, nextAttemptAt: 3 * MIN, lastError: UNREACHABLE.message }),
+    ]);
+    expect(deps.spool.discard).not.toHaveBeenCalled();
+  });
+
+  it("give-up → notifies with the last error, removes the item and cleans the spool (R4, R6.4, acceptance 3)", async () => {
+    const item = queued({ attempts: 4, nextAttemptAt: 30 * MIN });
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { upload: vi.fn().mockRejectedValue(UNREACHABLE) },
+      { initial: [item], now: () => 30 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(queue.items()).toEqual([]);
+    expect(deps.spool.discard).toHaveBeenCalledWith("q-1");
+    expect(notices).toEqual([messages.gaveUp("Title", UNREACHABLE.message, 30)]);
+  });
+
+  it("a download-stage item that gives up is named by its URL (no title yet)", async () => {
+    const item = queued({ stage: "download", attempts: 4 });
+    delete item.title;
+    delete item.epubPath;
+    const { pipeline, notify, notices } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [item], now: () => 30 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(notices).toEqual([messages.gaveUp(LINK, TRANSIENT_DOWNLOAD.message, 30)]);
+  });
+
+  it("successful retry of stage download → promotes to upload and continues (R3.2, acceptance 5)", async () => {
+    const item = queued({ stage: "download" });
+    delete item.title;
+    delete item.epubPath;
+    const { pipeline, notify, events, writes, queue } = setup({}, { initial: [item], now: () => 1 * MIN });
+    await pipeline.processDue([item], notify);
+    expect(events).toEqual([
+      "prepare q-1",
+      `download ${LINK} -> ${SPOOL}/q-1`,
+      `upload ${RESULT.filePath}`,
+      "discard q-1",
+      `notify ${messages.delivered("Title")}`,
+    ]);
+    // the promotion was persisted before the upload, keeping the window's start
+    expect(writes[0]?.items).toEqual([
+      expect.objectContaining({ stage: "upload", epubPath: RESULT.filePath, title: "Title", firstQueuedAt: 0 }),
+    ]);
+    expect(queue.items()).toEqual([]);
+  });
+
+  it("download retry OK but upload fails → stays queued at stage upload, silently", async () => {
+    const item = queued({ stage: "download" });
+    delete item.title;
+    delete item.epubPath;
+    const { pipeline, notify, notices, queue } = setup(
+      { upload: vi.fn().mockRejectedValue(UNREACHABLE) },
+      { initial: [item], now: () => 1 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(notices).toEqual([]);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({ stage: "upload", epubPath: RESULT.filePath, attempts: 1 }),
+    ]);
+  });
+
+  it("a retry that hits a permanent error → removed, spool cleaned, owner told why", async () => {
+    const item = queued({});
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { upload: vi.fn().mockRejectedValue(BROKEN_KEY) },
+      { initial: [item], now: () => 1 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(queue.items()).toEqual([]);
+    expect(deps.spool.discard).toHaveBeenCalledWith("q-1");
+    expect(notices).toEqual([messages.uploadConfig(BROKEN_KEY.message)]);
+  });
+
+  it("processes every due item of the batch, one after the other", async () => {
+    const a = queued({ id: "a", epubPath: "/spool/a/x.epub" });
+    const b = queued({ id: "b", epubPath: "/spool/b/y.epub" });
+    const { pipeline, notify, events } = setup({}, { initial: [a, b], now: () => 1 * MIN });
+    await pipeline.processDue([a, b], notify);
+    expect(events.filter((e) => e.startsWith("upload"))).toEqual([
+      "upload /spool/a/x.epub",
+      "upload /spool/b/y.epub",
+    ]);
+  });
+
+  it("a failed notification does not stop the batch", async () => {
+    const a = queued({ id: "a" });
+    const b = queued({ id: "b" });
+    const { pipeline, queue, logger } = setup({}, { initial: [a, b], now: () => 1 * MIN });
+    await pipeline.processDue([a, b], vi.fn().mockRejectedValue(new Error("Telegram down")));
+    expect(queue.items()).toEqual([]);
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("a retry never overlaps a request in progress: work runs one at a time", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const item = queued({});
+    const { pipeline, notify } = setup(
+      {
+        download: vi.fn(async () => {
+          order.push("download:start");
+          await gate;
+          order.push("download:end");
+          return RESULT;
+        }),
+        upload: vi.fn(async (path: string) => {
+          order.push(`upload ${path}`);
+        }),
+      },
+      { initial: [item], now: () => 1 * MIN },
+    );
+    const request = pipeline.handle(LINK, async () => {});
+    await vi.waitFor(() => expect(order).toContain("download:start"));
+    const retry = pipeline.processDue([item], notify);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(["download:start"]);
+    release();
+    await Promise.all([request, retry]);
+    expect(order).toEqual([
+      "download:start",
+      "download:end",
+      `upload ${RESULT.filePath}`,
+      `upload ${item.epubPath}`,
+    ]);
   });
 });
 
@@ -292,6 +501,10 @@ const botConfig: ResolvedConfig = {
   sshConnectTimeoutSec: 10,
   kindlePort: 2222,
   remotePath: "/mnt/us/documents/books/",
+  queuePath: "/q/queue.json",
+  spoolDir: SPOOL,
+  giveUpAfterMs: 30 * MIN,
+  retryBackoffMinutes: [1, 2, 4, 8, 15],
 };
 
 const botInfo = {
@@ -327,61 +540,43 @@ function textUpdate(updateId: number, fromId: number, text: string): Update {
 const ok = () => ({ ok: true as const, result: true as never });
 
 describe("createBot — wiring", () => {
-  function botWith(deps: Partial<RequestDeps>) {
-    const bot = createBot(botConfig, { logger: silentLogger(), ...deps }, { botInfo });
-    const sent: string[] = [];
+  function botWith(overrides: Partial<PipelineDeps>) {
+    const ctx = setup(overrides);
+    const bot = createBot(botConfig, ctx.pipeline, { botInfo });
+    const sent: { chatId: unknown; text: string }[] = [];
     bot.api.config.use((_prev, method, payload) => {
-      if (method === "sendMessage" && "text" in payload) sent.push(String(payload.text));
+      if (method === "sendMessage" && "text" in payload)
+        sent.push({ chatId: "chat_id" in payload ? payload.chat_id : undefined, text: String(payload.text) });
       return Promise.resolve(ok());
     });
-    return { bot, sent };
+    return { bot, sent, ...ctx };
   }
 
-  const fakeDeps = (): Partial<RequestDeps> => ({
-    download: vi.fn(async () => RESULT),
-    upload: vi.fn(async () => {}),
-    makeTempDir: vi.fn(async () => "/tmp/bookcarrier-x"),
-    removeDir: vi.fn(async () => {}),
-  });
-
-  it("a message from someone else gets no reply and runs nothing (R1.1, acceptance 5)", async () => {
-    const deps = fakeDeps();
-    const { bot, sent } = botWith(deps);
+  it("a message from someone else gets no reply and runs nothing", async () => {
+    const { bot, sent, deps } = botWith({});
     await bot.handleUpdate(textUpdate(1, 99, LINK));
     expect(sent).toEqual([]);
     expect(deps.download).not.toHaveBeenCalled();
   });
 
-  it("a link from the owner is acknowledged and delivered (acceptance 1)", async () => {
-    const deps = fakeDeps();
-    const { bot, sent } = botWith(deps);
+  it("a link from the owner is acknowledged and delivered", async () => {
+    const { bot, sent } = botWith({});
     await bot.handleUpdate(textUpdate(1, OWNER, LINK));
-    expect(sent).toEqual([messages.ack, messages.delivered("Title")]);
+    expect(sent.map((s) => s.text)).toEqual([messages.ack, messages.delivered("Title")]);
   });
 
-  it("text that is not an AO3 link → 'not recognized', FanFicFare not invoked (acceptance 2)", async () => {
-    const deps = fakeDeps();
-    const { bot, sent } = botWith(deps);
-    await bot.handleUpdate(textUpdate(1, OWNER, "hola"));
-    expect(sent).toEqual([messages.noLink]);
-    expect(deps.download).not.toHaveBeenCalled();
+  it("an unreachable Kindle is reported as enqueued (acceptance 1)", async () => {
+    const { bot, sent, queue } = botWith({ upload: vi.fn().mockRejectedValue(UNREACHABLE) });
+    await bot.handleUpdate(textUpdate(1, OWNER, LINK));
+    expect(sent.at(-1)?.text).toBe(messages.queuedUpload("Title", UNREACHABLE.message, 30));
+    expect(queue.items()).toHaveLength(1);
   });
 
-  it("a failed download is reported and scp is not attempted (acceptance 3)", async () => {
-    const deps = fakeDeps();
-    deps.download = vi.fn().mockRejectedValue(new DownloadFailedError("exit-code", "HTTP 525"));
-    const { bot, sent } = botWith(deps);
-    await bot.handleUpdate(textUpdate(1, OWNER, LINK));
-    expect(sent.at(-1)).toBe(messages.downloadFailed("HTTP 525"));
-    expect(deps.upload).not.toHaveBeenCalled();
-  });
-
-  it("an unreachable Kindle is reported (acceptance 4)", async () => {
-    const deps = fakeDeps();
-    deps.upload = vi.fn().mockRejectedValue(new UploadFailedError("exit-code", "Host is down"));
-    const { bot, sent } = botWith(deps);
-    await bot.handleUpdate(textUpdate(1, OWNER, LINK));
-    expect(sent.at(-1)).toBe(messages.sendFailed("Title", "Host is down"));
+  it("notifyOwner sends to the owner's chat (used by retries and startup notices)", async () => {
+    const { bot, sent } = botWith({});
+    const { notifyOwner } = await import("../src/bot.js");
+    await notifyOwner(bot, OWNER)("hello");
+    expect(sent).toEqual([{ chatId: OWNER, text: "hello" }]);
   });
 });
 
@@ -403,17 +598,8 @@ describe("createBot — sequential processing (grammY long polling)", () => {
       events.push(`upload ${path === RESULT.filePath ? "done" : "first"}`);
     });
 
-    const bot = createBot(
-      botConfig,
-      {
-        download,
-        upload,
-        makeTempDir: async () => "/tmp/bookcarrier-x",
-        removeDir: async () => {},
-        logger: silentLogger(),
-      },
-      { botInfo },
-    );
+    const { pipeline } = setup({ download, upload });
+    const bot = createBot(botConfig, pipeline, { botInfo });
 
     // Both messages arrive in the SAME getUpdates batch, exactly as when you share two links quickly.
     let delivered = false;
@@ -438,10 +624,9 @@ describe("createBot — sequential processing (grammY long polling)", () => {
     const polling = bot.start();
     await vi.waitFor(() => expect(events).toContain("download:start 111"));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    // The first download is still running: the second message has NOT started.
     expect(events).toEqual(["download:start 111"]);
 
-    releaseFirst({ filePath: "/tmp/bookcarrier-x/111-First.epub", title: "First" });
+    releaseFirst({ filePath: "/spool/req-1/111-First.epub", title: "First" });
     await vi.waitFor(() => expect(events).toContain("upload done"));
     await bot.stop();
     await polling;

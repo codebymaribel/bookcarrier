@@ -17,6 +17,16 @@ export type Config = {
   sshConnectTimeoutSec?: number;
   kindlePort?: number;
   remotePath?: string;
+
+  // retry queue (feature 2)
+  /** Queue state file. `~` is expanded. */
+  queuePath?: string;
+  /** Directory where downloaded EPUBs wait for delivery; never the system temp dir. */
+  spoolDir?: string;
+  /** Give up on a queued request this long after it was first enqueued. */
+  giveUpAfterMs?: number;
+  /** Backoff ladder, one delay per retry, in minutes. */
+  retryBackoffMinutes?: number[];
 };
 
 /** Config with optional fields already resolved: what the rest of the daemon uses. */
@@ -28,14 +38,23 @@ export const CONFIG_DEFAULTS = {
   sshConnectTimeoutSec: 10,
   kindlePort: 2222,
   remotePath: "/mnt/us/documents/books/",
-} as const satisfies Required<Pick<Config, OptionalKey>>;
+  queuePath: join(homedir(), ".bookcarrier", "queue.json"),
+  spoolDir: join(homedir(), ".bookcarrier", "spool"),
+  giveUpAfterMs: 1_800_000,
+  retryBackoffMinutes: [1, 2, 4, 8, 15],
+} as const satisfies Required<Pick<Config, Exclude<OptionalKey, "retryBackoffMinutes">>> &
+  Pick<Config, "retryBackoffMinutes">;
 
 type OptionalKey =
   | "downloadTimeoutMs"
   | "uploadTimeoutMs"
   | "sshConnectTimeoutSec"
   | "kindlePort"
-  | "remotePath";
+  | "remotePath"
+  | "queuePath"
+  | "spoolDir"
+  | "giveUpAfterMs"
+  | "retryBackoffMinutes";
 
 /** Fixed path of the real config, outside the repo (R6.1). */
 export const DEFAULT_CONFIG_PATH = join(homedir(), ".bookcarrier", "config.json");
@@ -76,6 +95,39 @@ function requireString(raw: Record<string, unknown>, key: string, problems: stri
   else if (typeof value !== "string" || value.trim() === "")
     problems.push(`"${key}" must be a non-empty string`);
   return typeof value === "string" ? value : "";
+}
+
+/** Validates an optional non-empty string; returns the default if it is missing. */
+function optionalString(
+  raw: Record<string, unknown>,
+  key: OptionalKey,
+  fallback: string,
+  problems: string[],
+): string {
+  const value = raw[key];
+  if (value === undefined) return fallback;
+  if (typeof value !== "string" || value.trim() === "") {
+    problems.push(`"${key}" is optional, but if present it must be a non-empty string`);
+    return fallback;
+  }
+  return value;
+}
+
+/** Validates the optional backoff ladder: a non-empty list of positive integers (minutes). */
+function optionalLadder(raw: Record<string, unknown>, problems: string[]): number[] {
+  const value = raw["retryBackoffMinutes"];
+  if (value === undefined) return [...CONFIG_DEFAULTS.retryBackoffMinutes];
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    !value.every((v) => typeof v === "number" && Number.isInteger(v) && v > 0)
+  ) {
+    problems.push(
+      `"retryBackoffMinutes" is optional, but if present it must be a non-empty list of positive integers`,
+    );
+    return [...CONFIG_DEFAULTS.retryBackoffMinutes];
+  }
+  return value as number[];
 }
 
 /** Validates an optional positive integer; returns the default if it is missing. */
@@ -145,6 +197,16 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     else remotePath = remotePathRaw;
   }
 
+  const queuePath = optionalString(raw, "queuePath", CONFIG_DEFAULTS.queuePath, problems);
+  const spoolDir = optionalString(raw, "spoolDir", CONFIG_DEFAULTS.spoolDir, problems);
+  const giveUpAfterMs = optionalPositiveInt(
+    raw,
+    "giveUpAfterMs",
+    CONFIG_DEFAULTS.giveUpAfterMs,
+    problems,
+  );
+  const retryBackoffMinutes = optionalLadder(raw, problems);
+
   if (problems.length > 0) throw new ConfigError(problems);
 
   return {
@@ -158,6 +220,10 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     sshConnectTimeoutSec,
     kindlePort,
     remotePath,
+    queuePath: expandHome(queuePath),
+    spoolDir: expandHome(spoolDir),
+    giveUpAfterMs,
+    retryBackoffMinutes,
   };
 }
 

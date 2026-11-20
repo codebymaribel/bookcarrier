@@ -1,0 +1,93 @@
+import { randomUUID } from "node:crypto";
+import { createPipeline, type Pipeline, type PipelineDeps, type Send } from "./bot.js";
+import type { ResolvedConfig } from "./config.js";
+import { downloadEpub } from "./downloader.js";
+import type { Logger } from "./logger.js";
+import { messages } from "./messages.js";
+import { createQueue, type Queue } from "./queue/queue.js";
+import { createScheduler, type Scheduler } from "./queue/scheduler.js";
+import { createSpool } from "./queue/spool.js";
+import { createStateStore } from "./queue/state.js";
+import { uploadToKindle } from "./uploader.js";
+
+export type Daemon = {
+  queue: Queue;
+  pipeline: Pipeline;
+  scheduler: Scheduler;
+  /** Arms the retry timer and sends the startup notices. Call it once the bot can send messages. */
+  start(): void;
+  /** Cancels the retry timer (shutdown). */
+  stop(): void;
+};
+
+export type DaemonOptions = {
+  logger: Logger;
+  /** How retries and startup notices reach the owner. */
+  notify: Send;
+  download?: PipelineDeps["download"];
+  upload?: PipelineDeps["upload"];
+};
+
+/**
+ * Wires the retry queue at startup (T9):
+ * 1. reads the persisted state: missing → empty (R2.4); corrupt → empty, moved aside, owner told
+ *    once `start()` runs (R2.5);
+ * 2. reconciles the spool, deleting EPUBs no restored item references (R5.3);
+ * 3. builds the queue, the pipeline and the scheduler, with every queue change re-arming the timer.
+ *
+ * Nothing runs until `start()`: it arms the timer from the restored items, so an item that came due
+ * while the daemon was down is retried at once (R2.3).
+ */
+export async function createDaemon(config: ResolvedConfig, options: DaemonOptions): Promise<Daemon> {
+  const { logger, notify } = options;
+  const store = createStateStore(config.queuePath);
+  const { state, corruptBackup } = await store.read();
+  if (corruptBackup !== undefined) {
+    logger.error("the queue file was unreadable; starting with an empty queue", { corruptBackup });
+  }
+
+  const spool = createSpool(config.spoolDir);
+  const removed = await spool.reconcile(state.items);
+  if (removed.length > 0) logger.info("removed orphan entries from the spool", { removed });
+
+  let scheduler: Scheduler | undefined;
+  const queue = createQueue({
+    store,
+    initial: state.items,
+    backoffMs: config.retryBackoffMinutes.map((m) => m * 60_000),
+    giveUpAfterMs: config.giveUpAfterMs,
+    onChange: () => scheduler?.reschedule(),
+  });
+
+  const pipeline = createPipeline(config, {
+    download: options.download ?? downloadEpub,
+    upload: options.upload ?? uploadToKindle,
+    spool,
+    queue,
+    newId: randomUUID,
+    logger,
+  });
+
+  scheduler = createScheduler({
+    items: () => queue.items(),
+    process: (due) => pipeline.processDue(due, notify),
+    logger,
+  });
+  const timer = scheduler;
+
+  return {
+    queue,
+    pipeline,
+    scheduler: timer,
+    start() {
+      logger.info("retry queue restored", { items: state.items.length });
+      if (corruptBackup !== undefined) {
+        notify(messages.queueFileCorrupt(corruptBackup)).catch((err: unknown) => {
+          logger.warn("could not send a Telegram message", { error: err });
+        });
+      }
+      timer.reschedule();
+    },
+    stop: () => timer.stop(),
+  };
+}
