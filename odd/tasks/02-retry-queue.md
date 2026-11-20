@@ -25,8 +25,8 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - [x] T7 uploader failure classification — S1 — inline — commit: (this commit: feat(queue) wire retry queue)
 - [x] T8 bot.ts orchestration + notifications — S1, S3, S4, S6 — inline — commit: (this commit: feat(queue) wire retry queue)
 - [x] T9 startup restoration in index.ts — S2, S5 — inline — commit: (this commit: feat(queue) wire retry queue)
-- [ ] T10 LaunchAgent template plist + docs — S7 — inline — commit: 
-- [ ] T11 binary check at startup + launchctl docs — S7 — inline — commit: 
+- [x] T10 LaunchAgent template plist + docs — S7 — inline — commit: (pending, parent commits)
+- [x] T11 binary check at startup + launchctl docs — S7 — inline — commit: (pending, parent commits)
 - [ ] Manual verification list (tasks.md) — owner, on the real Kindle — pending human
 
 ## Log
@@ -34,3 +34,4 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - L1: "Realiza la feature 2"
 - L2: Exploration: feature 1 not merged to main; downloader has no 403/429/404 detection yet (only stderr text); FanFicFare needs an empty exclusive outDir, so the spool uses one sub-directory per queue item (`spool/<id>/<file>.epub`).
 - L3: Implementation decisions: spool keeps one directory per item (`spool/<id>/`), so `discard(id)` removes the item's directory; an unrecognized FanFicFare exit is classified transient (the 30-min window bounds the cost); a retry that hits a permanent error is removed and reported; requests and retries share one work chain so AO3 and the Kindle see one operation at a time; a batch that throws re-arms no sooner than 60 s. Config gained `queuePath`, `spoolDir`, `giveUpAfterMs`, `retryBackoffMinutes`. Orchestration of startup lives in `src/daemon.ts`.
+- L4: T10–T11 done: template plist `launchd/com.codebymaribel.bookcarrier.plist` (placeholders `__REPO__`/`__HOME__`, node@24, KeepAlive SuccessfulExit=false, ThrottleInterval 10, logs under ~/Library/Logs/Bookcarrier, Homebrew PATH; `plutil -lint` OK); `src/binaries.ts` (`findMissingBinaries` searches PATH for executable regular files, `checkRequiredBinaries` logs one error with the missing names + PATH, nothing when all present) wired into `main()` after config load, test-first in `test/binaries.test.ts`; README.md/README.es.md document the queue, new config fields and LaunchAgent install; tasks.md T1–T11 ticked (manual list pending). typecheck/test (213)/build green.

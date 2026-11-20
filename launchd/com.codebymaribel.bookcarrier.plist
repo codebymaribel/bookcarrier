@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template LaunchAgent for bookcarrier (feature 2, R7).
+
+  Copy it to ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist and replace the placeholders:
+    __REPO__ → absolute path of this repository (e.g. the output of `pwd` at its root)
+    __HOME__ → absolute path of your home directory (the output of `echo $HOME`)
+  launchd does not expand `~` or `$HOME`, so every path must be absolute.
+  Validate with `plutil -lint` before loading it (see README.md, "Run as a LaunchAgent").
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.codebymaribel.bookcarrier</string>
+
+  <!-- R7.6: versioned Homebrew node (`brew install node@24`), stable across patch upgrades. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/node@24/bin/node</string>
+    <string>__REPO__/dist/index.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <!-- R7.1: start at login. -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- R7.1/R7.2: relaunch on crash, but respect a clean, intentional exit (exit code 0). -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <!-- R7.3: space out relaunches if the daemon keeps crashing at startup. -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- R7.4: own log files; create the directory first: mkdir -p ~/Library/Logs/Bookcarrier -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.err.log</string>
+
+  <!-- R7.5: launchd builds no useful PATH; without Homebrew's prefix `fanficfare` is not found. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

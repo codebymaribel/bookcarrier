@@ -1,4 +1,5 @@
 import type { Bot } from "grammy";
+import { checkRequiredBinaries } from "./binaries.js";
 import { createBot, notifyOwner, type Send } from "./bot.js";
 import { ConfigError, loadConfig, type ResolvedConfig } from "./config.js";
 import { createDaemon } from "./daemon.js";
@@ -32,6 +33,10 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  // R7.7: a missing fanficfare/scp (typically a trimmed PATH under launchd) is logged here, at
+  // startup, instead of surfacing later as a misleading download error. It only logs.
+  await checkRequiredBinaries(logger);
 
   // Retries and startup notices go to the owner through the bot, which needs the pipeline first:
   // the notifier looks the bot up lazily, and nothing is sent before `daemon.start()`.
