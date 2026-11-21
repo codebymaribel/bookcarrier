@@ -106,14 +106,14 @@ The order follows the dependencies: config and pure helpers first, then the subp
 
 ## Manual verification (before closing the feature)
 
-- [ ] Send an **EPUB**, a **MOBI** and a **PDF**: all three arrive in `/mnt/us/documents/books/`, not in `…/books/AO3/`, and open in KOReader (acceptance criterion 1).
-- [ ] Send the same file again: the question appears; "Cancel" leaves it untouched; "Replace" overwrites it, and KOReader keeps the reading position (acceptance criteria 8–10).
-- [ ] Tap a button after 10 minutes, and after restarting the daemon: "no longer pending" (acceptance criterion 11).
+- [x] Send an **EPUB**, a **MOBI** and a **PDF**: all three arrive in `/mnt/us/documents/books/`, not in `…/books/AO3/`, and open in KOReader (acceptance criterion 1).
+- [x] Send the same file again: the question appears; "Cancel" leaves it untouched; "Replace" overwrites it, and KOReader keeps the reading position (acceptance criteria 8–10).
+- [x] Tap a button after 10 minutes, and after restarting the daemon: "no longer pending" (acceptance criterion 11).
 - [ ] With a question pending, share an AO3 link: the fic is delivered normally (acceptance criterion 12).
-- [ ] Send `Dune: Messiah.epub`, `Corazón.pdf` and `it's.pdf`: check the names on the Kindle with `ls` over SSH, and that sending each one a second time triggers the question (the check finds them under the same name) (acceptance criteria 5–7).
-- [ ] Send a `.azw3` and a `.jpg`: rejected, the reply lists EPUB, MOBI, PDF (acceptance criterion 3).
-- [ ] Send a file > 20 MB: "too big", nothing downloaded (acceptance criterion 4).
-- [ ] Send a ~20 MB PDF: it arrives within `uploadTimeoutMs`. If it does not, raise the default and note it in research.md.
-- [ ] With the Kindle asleep, send a document: "unreachable, send it again", nothing downloaded, nothing in the queue (acceptance criterion 13).
-- [ ] Change `documentFolders` to `{ "epub": "/mnt/us/documents/books/", "pdf": "/mnt/us/documents/pdfs" }` (create the folder first), restart: the PDF goes to `pdfs/` and a MOBI is rejected, with no code change (acceptance criterion 18). Then put `"PDF"` as a key: the daemon does not start and the log names it (acceptance criterion 19).
-- [ ] Search the daemon's log for the bot token after all of the above: no match (acceptance criterion 15).
+- [x] Send `Dune: Messiah.epub`, `Corazón.pdf` and `it's.pdf`: check the names on the Kindle with `ls` over SSH, and that sending each one a second time triggers the question (the check finds them under the same name) (acceptance criteria 5–7).
+- [x] Send a `.azw3` and a `.jpg`: rejected, the reply lists EPUB, MOBI, PDF (acceptance criterion 3).
+- [x] Send a file > 20 MB: "too big", nothing downloaded (acceptance criterion 4).
+- [x] Send a ~20 MB PDF: it arrives within `uploadTimeoutMs`. If it does not, raise the default and note it in research.md.
+- [x] With the Kindle asleep, send a document: "unreachable, send it again", nothing downloaded, nothing in the queue (acceptance criterion 13).
+- [x] Change `documentFolders` to `{ "epub": "/mnt/us/documents/books/", "pdf": "/mnt/us/documents/pdfs" }` (create the folder first), restart: the PDF goes to `pdfs/` and a MOBI is rejected, with no code change (acceptance criterion 18). Then put `"PDF"` as a key: the daemon does not start and the log names it (acceptance criterion 19).
+- [x] Search the daemon's log for the bot token after all of the above: no match (acceptance criterion 15).
