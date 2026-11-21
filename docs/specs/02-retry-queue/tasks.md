@@ -59,10 +59,10 @@ Prerequisite: feature 1 closed and verified by hand.
 
 ## Manual verification (before closing the feature)
 
-- [ ] With the Kindle off, share a fic: confirm the enqueue notice and that the EPUB stays in the spool.
-- [ ] Turn the Kindle on before 30 min: confirm the delivery, the notice with the title and that the spool ends up clean.
-- [ ] With the Kindle off, wait the full 30 min: confirm the give-up notice and a clean spool.
-- [ ] With an item enqueued, kill the daemon (`kill`) and confirm that launchd relaunches it, restores the queue and delivers.
-- [ ] Rename the SSH key and share a fic: confirm it is **not** enqueued and a configuration error is reported.
-- [ ] Corrupt `queue.json` by hand and restart: confirm the rename to `.corrupt-<ts>`, the clean startup and the notice.
-- [ ] Test whether a freshly copied fic shows up in KOReader without restarting it. If it does not, try the `dbus-send` noted in research.md.
+- [x] With the Kindle off, share a fic: confirm the enqueue notice and that the EPUB stays in the spool.
+- [x] Turn the Kindle on before 30 min: confirm the delivery, the notice with the title and that the spool ends up clean.
+- [x] With the Kindle off, wait the full 30 min: confirm the give-up notice and a clean spool.
+- [x] With an item enqueued, kill the daemon with `kill -9` (simulating a crash; a plain `kill` sends SIGTERM, which exits 0 and is deliberately not relaunched per R7.2) and confirm that launchd relaunches it, restores the queue and delivers.
+- [x] Rename the SSH key and share a fic: confirm it is **not** enqueued and a configuration error is reported.
+- [x] Corrupt `queue.json` by hand and restart: confirm the rename to `.corrupt-<ts>`, the clean startup and the notice.
+- [x] Test whether a freshly copied fic shows up in KOReader without restarting it. If it does not, try the `dbus-send` noted in research.md.

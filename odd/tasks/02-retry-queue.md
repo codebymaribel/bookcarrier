@@ -27,7 +27,7 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - [x] T9 startup restoration in index.ts — S2, S5 — inline — commit: (this commit: feat(queue) wire retry queue)
 - [x] T10 LaunchAgent template plist + docs — S7 — inline — commit: (pending, parent commits)
 - [x] T11 binary check at startup + launchctl docs — S7 — inline — commit: (pending, parent commits)
-- [ ] Manual verification list (tasks.md) — owner, on the real Kindle — pending human
+- [x] Manual verification list (tasks.md) — owner, on the real Kindle — done 2026-11-21
 
 ## Log
 
@@ -38,3 +38,4 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - L5: Hardening after assess (medium, review not due): spool reconcile only deletes uuid-named item dirs and loose .epub files, so a misconfigured spoolDir cannot delete unrelated files. Manual verification list remains for the owner.
 - L6: gentle-ai-verify (Risk: item 5): S2 pass, S7 partial — blocker: a polling failure after start left the retry timer alive so the process never exited 1 and launchd could not relaunch it. Fixed with daemon.pollUntilStopped (finally → daemon.stop()), plist contract test added, engines raised to >=24.15.0 (write-file-atomic 8 requirement). Clean SIGTERM exit 0 still needs a real-Telegram manual check.
 - L7: Owner ran the SIGTERM check with the real Telegram config: "bot started" → "retry queue restored {items:0}" → "shutting down {SIGTERM}" → "bot stopped", exit code: 0. S7 clean-exit path confirmed.
+- L8: Owner completed every manual check in docs/specs/02-retry-queue/tasks.md on the real Kindle (enqueue + spool, delivery before 30 min, give-up at 30 min, kill -9 relaunch + restore + deliver, renamed SSH key not enqueued, corrupt queue.json renamed + notice, KOReader pick-up). The kill item was reworded to `kill -9` (plain kill = SIGTERM = exit 0, not relaunched per R7.2). Real-world evidence 2026-11-21 10:26–10:27Z: Wi-Fi timeout enqueued, delivered on first retry.

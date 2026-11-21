@@ -9,7 +9,7 @@ phone ──share link──▶ Telegram bot ──▶ Bookcarrier (on your Mac)
                            ◀──────────── "Delivered “Title” to your Kindle." ◀──────────────┘
 ```
 
-> **Status:** Feature 1 (send an AO3 fic) is done and verified end to end. Feature 2 (retry queue + start at login with launchd) is built and covered by tests; its manual verification on the real Kindle is still pending. Sending ebooks and PDFs as files (feature 3) is specified but not built yet.
+> **Status:** Feature 1 (send an AO3 fic) is done and verified end to end. Feature 2 (retry queue + start at login with launchd) is done and verified on the real Kindle. Sending ebooks and PDFs as files (feature 3) is specified but not built yet.
 >
 > The project was called **Ficarrier** while it only handled fanfics; it was renamed when its scope grew to books in general.
 
@@ -219,7 +219,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 | #   | Feature                                                 | State        |
 | --- | ------------------------------------------------------- | ------------ |
 | 1   | Send an AO3 fic from a link                             | ✅ Done      |
-| 2   | Retry queue + start at login with launchd               | ✅ Done (manual verification pending) |
+| 2   | Retry queue + start at login with launchd               | ✅ Done                              |
 | 3   | Send an ebook or a PDF as a file (EPUB, MOBI, PDF)      | 📝 Specified |
 | 4   | “Follow” button and chapter tracking                    | Planned      |
 | 5   | Daily check for new chapters                            | Planned      |

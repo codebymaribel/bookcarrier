@@ -9,7 +9,7 @@ celular ──compartir link──▶ bot de Telegram ──▶ Bookcarrier (en 
                                  ◀──────── "Delivered “Título” to your Kindle." ◀─────────────────────┘
 ```
 
-> **Estado:** la Feature 1 (enviar un fic de AO3) está terminada y verificada de punta a punta. La Feature 2 (cola de reintentos + arranque al iniciar sesión con launchd) está construida y cubierta por tests; falta su verificación manual con la Kindle real. El envío de ebooks y PDFs como archivos (feature 3) está especificado pero todavía no construido.
+> **Estado:** la Feature 1 (enviar un fic de AO3) está terminada y verificada de punta a punta. La Feature 2 (cola de reintentos + arranque al iniciar sesión con launchd) está terminada y verificada con la Kindle real. El envío de ebooks y PDFs como archivos (feature 3) está especificado pero todavía no construido.
 >
 > El proyecto se llamaba **Ficarrier** mientras solo manejaba fanfics; cambió de nombre cuando su alcance creció a libros en general.
 
@@ -221,7 +221,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | #   | Feature                                                      | Estado          |
 | --- | ------------------------------------------------------------ | --------------- |
 | 1   | Enviar un fic de AO3 desde un link                           | ✅ Hecha        |
-| 2   | Cola de reintentos + arranque al iniciar sesión con launchd  | ✅ Hecha (falta verificación manual) |
+| 2   | Cola de reintentos + arranque al iniciar sesión con launchd  | ✅ Hecha                             |
 | 3   | Enviar un ebook o un PDF como archivo (EPUB, MOBI, PDF)      | 📝 Especificada |
 | 4   | Botón “Seguir” y seguimiento de capítulos                    | Planeada        |
 | 5   | Revisión diaria de capítulos nuevos                          | Planeada        |
