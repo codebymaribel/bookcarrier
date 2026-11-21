@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // R7.7: a missing fanficfare/scp (typically a trimmed PATH under launchd) is logged here, at
+  // R7.7: a missing fanficfare/scp/ssh (typically a trimmed PATH under launchd) is logged here, at
   // startup, instead of surfacing later as a misleading download error. It only logs.
   await checkRequiredBinaries(logger);
 
