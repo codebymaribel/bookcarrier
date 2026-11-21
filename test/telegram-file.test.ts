@@ -242,3 +242,29 @@ describe("downloadTelegramFile — the token never leaks (R6.5, acceptance crite
     });
   }
 });
+
+describe("downloadTelegramFile — read-side errors are never rethrown raw (R6.5)", () => {
+  it("a body error carrying a syscall and the URL becomes a clean network failure", async () => {
+    const d = deps({
+      fetch: (async (url: string | URL | Request) =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(
+                Object.assign(new Error(`read ECONNRESET ${String(url)}`), { syscall: "read", code: "ECONNRESET" }),
+              );
+            },
+          }),
+        )) as typeof fetch,
+    });
+    const e = (await failure(d)) as Error;
+    expect(e).toBeInstanceOf(TelegramDownloadError);
+    expect((e as TelegramDownloadError).reason).toBe("network");
+    expect(e.message).toContain("ECONNRESET");
+    const line = formatLine(new Date(0), "error", "document download failed", { err: e });
+    for (const text of [e.message, String(e), e.stack ?? "", line]) {
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain(URL_FRAGMENT);
+    }
+  });
+});

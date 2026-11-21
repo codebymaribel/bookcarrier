@@ -36,8 +36,8 @@ export class TelegramDownloadError extends Error {
 }
 
 /**
- * Does this `getFile` rejection mean "the file is too big"? The exact Bot API text was not recorded
- * (odd L5), so this matches loosely on the description/message and stays the one place to adjust.
+ * Does this `getFile` rejection mean "the file is too big"? The recorded Bot API text is
+ * "Bad Request: file is too big" (odd L6); this matches loosely and stays the one place to adjust.
  */
 export function isTooBigError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -125,16 +125,25 @@ export async function downloadTelegramFile(
     throw new TelegramDownloadError("empty", `Telegram sent an empty file for ${filePath}`);
   }
 
+  // pipeline() forwards one stream's error to the other, so the side that failed is the one that
+  // emitted first.
+  const input = Readable.fromWeb(res.body as NodeReadableStream<Uint8Array>);
+  const out = createWriteStream(destPath, { flags: "wx" });
+  let firstFailure: "read" | "write" | undefined;
+  input.once("error", () => {
+    firstFailure ??= "read";
+  });
+  out.once("error", () => {
+    firstFailure ??= "write";
+  });
   try {
-    await pipeline(
-      Readable.fromWeb(res.body as NodeReadableStream<Uint8Array>),
-      createWriteStream(destPath, { flags: "wx" }),
-      { signal },
-    );
+    await pipeline(input, out, { signal });
   } catch (err) {
     if (signal.aborted) throw timedOut(`downloading ${filePath}`);
     // A local write problem (e.g. EEXIST from "wx") is a bug, not a download failure: rethrow it.
-    if ((err as { syscall?: unknown } | null)?.syscall !== undefined) throw err;
+    // Decided by origin (the write stream), never by the error's shape: a read-side error must not
+    // escape raw, because its message can carry the URL and the token (R6.5).
+    if (firstFailure === "write") throw err;
     throw new TelegramDownloadError("network", `network error downloading ${filePath} (${errorLabel(err)})`);
   }
 
