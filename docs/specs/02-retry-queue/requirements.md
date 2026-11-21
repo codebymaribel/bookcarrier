@@ -76,9 +76,9 @@ R2's persistence promise is useless if the daemon dies and does not come back. T
 
 ## Out of scope for this feature
 
-- "Follow" button and chapter tracking (feature 3).
-- Daily update check (feature 4).
-- `/list`, `/drop`, `/status` commands (feature 5) — although `/status` will read the queue we build here.
+- "Follow" button and chapter tracking (feature 4).
+- Daily update check (feature 5).
+- `/list`, `/drop`, `/status` commands (feature 6) — although `/status` will read the queue we build here.
 - Migrating state to SQLite (only if JSON becomes a problem).
 - Log rotation.
 
