@@ -27,10 +27,25 @@ export type Config = {
   giveUpAfterMs?: number;
   /** Backoff ladder, one delay per retry, in minutes. */
   retryBackoffMinutes?: number[];
+
+  // document send (feature 3)
+  /**
+   * Extension (lower-case, no dot) → folder on the Kindle. Its keys are the accepted formats.
+   * When present it replaces the default as a whole (R8.3).
+   */
+  documentFolders?: Record<string, string>;
 };
 
 /** Config with optional fields already resolved: what the rest of the daemon uses. */
-export type ResolvedConfig = Required<Config>;
+export type ResolvedConfig = Omit<Required<Config>, "documentFolders"> & {
+  /**
+   * Extension → folder, always ending in "/". A Map, not a plain object, so a lookup like
+   * `x.constructor` never hits `Object.prototype` (design.md).
+   */
+  documentFolders: ReadonlyMap<string, string>;
+};
+
+const DEFAULT_DOCUMENTS_FOLDER = "/mnt/us/documents/books/";
 
 export const CONFIG_DEFAULTS = {
   downloadTimeoutMs: 600_000,
@@ -42,8 +57,15 @@ export const CONFIG_DEFAULTS = {
   spoolDir: join(homedir(), ".bookcarrier", "spool"),
   giveUpAfterMs: 1_800_000,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
+  /** The default formats and their folder (R8.1, R8.2). Never mutated: parseConfig copies it. */
+  documentFolders: new Map([
+    ["epub", DEFAULT_DOCUMENTS_FOLDER],
+    ["mobi", DEFAULT_DOCUMENTS_FOLDER],
+    ["pdf", DEFAULT_DOCUMENTS_FOLDER],
+  ]) as ReadonlyMap<string, string>,
 } as const satisfies Required<Pick<Config, Exclude<OptionalKey, "retryBackoffMinutes">>> &
-  Pick<Config, "retryBackoffMinutes">;
+  Pick<Config, "retryBackoffMinutes"> &
+  Pick<ResolvedConfig, "documentFolders">;
 
 type OptionalKey =
   | "downloadTimeoutMs"
@@ -130,6 +152,44 @@ function optionalLadder(raw: Record<string, unknown>, problems: string[]): numbe
   return value as number[];
 }
 
+/** A format key: a lower-case extension without a dot (R8.4). */
+const EXTENSION_KEY = /^[a-z0-9]+$/;
+
+/**
+ * Validates the optional `documentFolders` map and resolves it to a fresh Map (R8.1–R8.5).
+ * Absent → the default; present → replaces it as a whole. Every bad entry is named.
+ */
+function parseDocumentFolders(raw: unknown, problems: string[]): ReadonlyMap<string, string> {
+  if (raw === undefined) return new Map(CONFIG_DEFAULTS.documentFolders);
+  if (!isPlainObject(raw) || Object.keys(raw).length === 0) {
+    problems.push(
+      `"documentFolders" is optional, but if present it must be a non-empty object mapping extensions to Kindle folders`,
+    );
+    return new Map(CONFIG_DEFAULTS.documentFolders);
+  }
+  const folders = new Map<string, string>();
+  for (const [key, value] of Object.entries(raw)) {
+    if (!EXTENSION_KEY.test(key)) {
+      problems.push(
+        `documentFolders: key "${key}" must be a lower-case extension without a dot (only a-z and 0-9)`,
+      );
+      continue;
+    }
+    if (typeof value !== "string" || value.trim() === "") {
+      problems.push(`documentFolders: the folder for "${key}" must be a non-empty string`);
+      continue;
+    }
+    if (!value.startsWith("/")) {
+      problems.push(
+        `documentFolders: the folder for "${key}" must be an absolute path (starting with "/"), got "${value}"`,
+      );
+      continue;
+    }
+    folders.set(key, value.endsWith("/") ? value : `${value}/`);
+  }
+  return folders;
+}
+
 /** Validates an optional positive integer; returns the default if it is missing. */
 function optionalPositiveInt(
   raw: Record<string, unknown>,
@@ -206,6 +266,7 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     problems,
   );
   const retryBackoffMinutes = optionalLadder(raw, problems);
+  const documentFolders = parseDocumentFolders(raw["documentFolders"], problems);
 
   if (problems.length > 0) throw new ConfigError(problems);
 
@@ -224,6 +285,7 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     spoolDir: expandHome(spoolDir),
     giveUpAfterMs,
     retryBackoffMinutes,
+    documentFolders,
   };
 }
 
