@@ -30,7 +30,7 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - [ ] T11 bot.ts wiring — S1, S5 — wave 2 — commit:
 - [ ] T12 ssh in the startup binary check — S4 — wave 2 — commit:
 - [ ] T13 docs — S8, S9 — wave 2 — commit:
-- [ ] Research prerequisites by hand (`ssh … test -e` exit codes; > 20 MB `getFile` error text) — owner — pending human
+- [x] Research prerequisites by hand (`ssh … test -e` exit codes; > 20 MB `getFile` error text) — owner — research.md checklist marked done (L5)
 - [ ] Manual verification list (tasks.md) — owner — pending human
 
 ## Log
@@ -39,3 +39,4 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - L2: Prerequisite checks in research.md need the owner: the harness safety policy blocks the agent from reading ~/.ssh, so `ssh … test -e` is run by the owner; the > 20 MB `getFile` error needs a real upload to the bot. Wave 1 (T1–T9) starts meanwhile; T4/T7 details may be adjusted after the results.
 - L3: Owner check (research "> 20 MB" item, partial): a 20,333,552-byte PDF (19.39 MiB) → getUpdates carries `file_size`; getFile returned ok with `file_path` "documents/file_0.pdf". So the Bot API limit is binary (20 × 1024 × 1024 = 20,971,520 bytes), not 20,000,000: the T6 size check must use 20 MiB. The "file is too big" error text still needs a file > 20 MiB.
 - L4: Incident: `brew upgrade node` (26.12.1 → 26.13.1, fixing the missing libsimdjson.34) removed the node binary this Pi session spawns subagents with (ENOENT). Owner chose to restart the Pi session. Wave 1 (T1–T9) has NOT started: no source file was touched. Resume: relaunch the 4 wave-1 writers (A: T1 config; B: T2–T4 ssh.ts; C: T5, T6, T8 document.ts + pending.ts; D: T7, T9 telegram-file.ts + messages.ts) with disjoint surfaces. Pending from the owner: test -e exit codes (0/1/1/255 expected) and the getFile text for a file > 20 MiB; research items 3–7 instructions were given.
+- L5: "retoma la feature 3". Session restarted, node 26.13.1 works, baseline `pnpm test` 217/217 green. Owner marked every research.md "To test by hand" item done: `:` in a name fails on vfat (`scp: dest open "/mnt/us/documents/books/Dune: Messiah.pdf": Bad message`), a 19 MB scp took seconds (well inside uploadTimeoutMs), quoting with `'` works. Not recorded verbatim: the exact `test -e` exit codes and the `getFile` error text for > 20 MiB; T4 keeps 0/1/255 and T9 must not depend on the exact getFile text. Wave 1 relaunched (writers A–D).
