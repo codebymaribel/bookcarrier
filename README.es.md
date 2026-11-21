@@ -2,27 +2,26 @@
 
 [🇬🇧 English](./README.md) · 🇪🇸 Español
 
-Un pequeño demonio personal que lleva libros a tu Kindle desde el celular, a través de un bot privado de Telegram. Hoy maneja fanfics de [Archive of Our Own](https://archiveofourown.org) (AO3): compartís un link de AO3 con el bot y, unos momentos después, el EPUB está en la Kindle, listo para leer en KOReader. También recibe ebooks y PDFs (EPUB, MOBI, PDF) enviados al bot como archivos y los copia a una carpeta de libros de la Kindle, preguntando antes de reemplazar uno que ya está ahí.
+Un pequeño demonio personal que lleva libros a tu Kindle desde el celular, a través de un bot privado de Telegram, listos para leer en KOReader.
+
+Le mandás al bot ebooks y PDFs (EPUB, MOBI, PDF) como archivos y los copia a una carpeta de libros de la Kindle. También maneja fanfics de [Archive of Our Own](https://archiveofourown.org) (AO3): compartís un link de AO3 con el bot y, unos momentos después, el EPUB está en la Kindle.
+
+## Detrás de escena
 
 ```
-celular ──compartir link──▶ bot de Telegram ──▶ Bookcarrier (en tu Mac) ──FanFicFare──▶ EPUB ──scp──▶ Kindle
-                                 ◀──────── "Delivered “Título” to your Kindle." ◀─────────────────────┘
+celular ──compartir link──▶ bot de Telegram ──▶ Bookcarrier ──FanFicFare──▶ EPUB ──scp──▶ Kindle
 
 celular ──enviar archivo──▶ bot de Telegram ──▶ Bookcarrier ──getFile──▶ EPUB/MOBI/PDF ──scp──▶ Kindle
 ```
 
-> **Estado:** la Feature 1 (enviar un fic de AO3) está terminada y verificada de punta a punta. La Feature 2 (cola de reintentos + arranque al iniciar sesión con launchd) está terminada y verificada con la Kindle real. La Feature 3 (enviar un ebook o un PDF como archivo) está construida; falta su verificación manual con la Kindle real.
->
-> El proyecto se llamaba **Ficarrier** mientras solo manejaba fanfics; cambió de nombre cuando su alcance creció a libros en general.
-
 ## Qué hace hoy
 
-- Acepta un link a un work de AO3 compartido con el bot, incluso cuando el menú de compartir manda el título y la URL juntos.
-- Descarga el fic como EPUB con [FanFicFare](https://github.com/JimmXinu/FanFicFare), con el nombre `<id-del-work>-<título>.epub`, para que el nombre sea estable.
+- Acepta un link a un work de AO3 compartido con el bot, incluso cuando el menú de compartir manda el título y la URL juntos (descarga el fic como EPUB con [FanFicFare](https://github.com/JimmXinu/FanFicFare), con el nombre `<id-del-work>-<título>.epub`, para que el nombre sea estable).
+- Acepta un documento enviado al bot como archivo (por defecto EPUB, MOBI o PDF, de hasta 20 MB) y lo copia a su carpeta en la Kindle (`/mnt/us/documents/books/` por defecto, no la carpeta de los fics). Si ya hay un archivo con ese nombre, pregunta si lo reemplaza.
 - Lo copia a la Kindle con `scp`.
 - Te avisa en el chat si se entregó o qué falló exactamente.
-- Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos (ver [Cola de reintentos](#cola-de-reintentos)).
-- Acepta un documento enviado al bot como archivo (por defecto EPUB, MOBI o PDF, de hasta 20 MB) y lo copia a su carpeta en la Kindle (`/mnt/us/documents/books/` por defecto, no la carpeta de los fics). Si ya hay un archivo con ese nombre, pregunta si lo reemplaza. Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
+- Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos (ver [Cola de reintentos](#cola-de-reintentos)). Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
+
 - Puede correr como LaunchAgent de macOS: arranca al iniciar sesión y vuelve solo si se cae (ver [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent)).
 - Solo le responde a **vos**: los mensajes de cualquier otra cuenta de Telegram se ignoran sin responder.
 
@@ -290,7 +289,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | --- | ------------------------------------------------------------ | --------------- |
 | 1   | Enviar un fic de AO3 desde un link                           | ✅ Hecha        |
 | 2   | Cola de reintentos + arranque al iniciar sesión con launchd  | ✅ Hecha                             |
-| 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)           | 🧪 Construida, verificando en la Kindle |
+| 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)           | ✅ Hecha |
 | 4   | Botón “Seguir” y seguimiento de capítulos                    | Planeada        |
 | 5   | Revisión diaria de capítulos nuevos                          | Planeada        |
 | 6   | Comandos `/list`, `/drop`, `/status`                         | Planeada        |
