@@ -98,7 +98,8 @@ function errorText(err: unknown): string {
  * failure on a retry is removed and reported.
  *
  * All download/upload work, from requests and retries alike, runs one at a time through a single
- * promise chain: AO3 sees one request at a time and two scp never race for the Kindle.
+ * promise chain: AO3 sees one request at a time and two fic scp never race for the Kindle. Documents
+ * sent as files (document-flow.ts) do not join this chain; by default they go to a different folder.
  */
 export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipeline {
   const { logger, spool, queue } = deps;

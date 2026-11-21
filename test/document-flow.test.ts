@@ -297,9 +297,23 @@ describe("document flow — failures (R4.7, R6.3, R7.3–R7.5)", () => {
     await expect(flow.onDecision("x", "replace", throwing)).resolves.toBeUndefined();
 
     const existing = setup({ makeTempDir: vi.fn(boom) }, { existing: [`${PDFS}a.pdf`] });
-    // askOverwrite throws here: onDocument still resolves, and the pending entry is still usable.
+    // askOverwrite throws here: onDocument still resolves, and a later tap still resolves.
     await expect(existing.flow.onDocument(doc("a.pdf"), throwing)).resolves.toBeUndefined();
     await expect(existing.flow.onDecision("id1", "replace", throwing)).resolves.toBeUndefined();
+  });
+
+  it("the overwrite question failing to send drops the pending entry and tells the owner", async () => {
+    const { flow, deps, events } = setup({}, { existing: [`${PDFS}a.pdf`] });
+    const io: ChatIO = {
+      reply: async (text) => {
+        events.push(`reply ${text}`);
+      },
+      askOverwrite: vi.fn().mockRejectedValue(new Error("Bad Request")),
+    };
+    await expect(flow.onDocument(doc("a.pdf"), io)).resolves.toBeUndefined();
+    expect(events.at(-1)).toBe(`reply ${messages.unexpected}`);
+    expect(deps.pending.take("id1")).toBeUndefined();
+    expect(deps.download).not.toHaveBeenCalled();
   });
 
   it("removeDir failing is logged, not thrown", async () => {

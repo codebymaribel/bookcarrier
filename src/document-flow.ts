@@ -194,7 +194,10 @@ export function createDocumentFlow(
       try {
         await io.askOverwrite(messages.alreadyExists(safeName), id);
       } catch (err) {
+        // Without the question the owner has no buttons to tap: drop the entry and say so.
         logger.warn("could not send the overwrite question", { id, error: err });
+        deps.pending.take(id);
+        await say(io, messages.unexpected);
       }
     } catch (err) {
       logger.error("unexpected error handling a document", { error: err });
