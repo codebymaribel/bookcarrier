@@ -1,13 +1,14 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Bot, type BotConfig, type Context } from "grammy";
 import { extractWorkLink } from "./ao3-link.js";
 import type { ResolvedConfig } from "./config.js";
-import { DownloadFailedError, downloadEpub } from "./downloader.js";
-import { type Logger, logger as defaultLogger } from "./logger.js";
+import { DownloadFailedError, type DownloadResult, type downloadEpub } from "./downloader.js";
+import { classifyFailure } from "./errors.js";
+import type { Logger } from "./logger.js";
 import { failureMessage, messages } from "./messages.js";
-import { UploadFailedError, type UploadOptions, uploadToKindle } from "./uploader.js";
+import type { Queue } from "./queue/queue.js";
+import type { Spool } from "./queue/spool.js";
+import type { QueueItem } from "./queue/state.js";
+import { UploadFailedError, type UploadOptions, type uploadToKindle } from "./uploader.js";
 
 /**
  * Global grammY middleware that only lets the owner through (R1.1).
@@ -27,7 +28,7 @@ export function ownerOnly(
   };
 }
 
-/** The slice of the config the request flow needs (the tests do not build a full config). */
+/** The slice of the config the pipeline needs (the tests do not build a full config). */
 export type RequestConfig = Pick<
   ResolvedConfig,
   | "downloadTimeoutMs"
@@ -38,23 +39,28 @@ export type RequestConfig = Pick<
   | "sshKeyPath"
   | "kindleUser"
   | "kindleHost"
+  | "giveUpAfterMs"
+  | "retryBackoffMinutes"
 >;
 
-/** Everything the flow touches outside itself, injectable so tests need no subprocess or disk. */
-export type RequestDeps = {
+/** Everything the pipeline touches outside itself, injectable so tests need no subprocess or disk. */
+export type PipelineDeps = {
   download: typeof downloadEpub;
   upload: typeof uploadToKindle;
-  makeTempDir: () => Promise<string>;
-  removeDir: (dir: string) => Promise<void>;
+  spool: Pick<Spool, "prepare" | "discard">;
+  queue: Pick<Queue, "enqueue" | "promoteToUpload" | "recordFailure" | "remove">;
+  newId: () => string;
   logger: Logger;
 };
 
-const defaultDeps: RequestDeps = {
-  download: downloadEpub,
-  upload: uploadToKindle,
-  makeTempDir: () => mkdtemp(join(tmpdir(), "bookcarrier-")),
-  removeDir: (dir) => rm(dir, { recursive: true, force: true }),
-  logger: defaultLogger,
+/** Sends one text to the owner; failures are the caller's to swallow. */
+export type Send = (text: string) => Promise<unknown>;
+
+export type Pipeline = {
+  /** Handles one message from the owner, end to end. Never throws. */
+  handle(text: string, reply: Send): Promise<void>;
+  /** Retries the due queue items, one after the other. Never throws for a single item's failure. */
+  processDue(due: readonly QueueItem[], notify: Send): Promise<void>;
 };
 
 /** Tail of the subprocess's stderr, when the error carries one: for the logs, never for the owner. */
@@ -64,24 +70,32 @@ function stderrOf(err: unknown): string | undefined {
     : undefined;
 }
 
+/** The short error text kept in the queue and shown on give-up. */
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
- * Builds the function that handles one message from the owner, end to end:
- * validate the link → acknowledge → download → send → confirm (or explain the failure).
+ * Builds the delivery pipeline shared by new requests and retries.
  *
- * The returned function never throws: every failure ends in one message to the owner
- * ({@link failureMessage}) and one log line. It is meant to be `await`ed by the grammY handler, so
- * updates are processed one at a time (grammY's long polling is sequential) and nothing blocks
- * the event loop, since all I/O is async.
+ * New request: validate the link → acknowledge → download into the spool → send → confirm. On a
+ * failure the error is classified ({@link classifyFailure}): a transient one is enqueued at the
+ * stage it failed in, keeping the EPUB if it was already downloaded, and the owner is told once
+ * that it will be retried (R1.1, R1.3, R6.1); a permanent one is reported as in feature 1 and the
+ * spool is cleaned (R1.2, R1.4).
  *
- * `bot.ts` owns the request's temporary directory: it is created before the download and removed
- * in a `finally`, whether the request succeeded or failed (feature 2 replaces it with the spool).
+ * Retry: only the item's stage runs (R3.1). A download that succeeds is promoted to `upload` and
+ * the upload follows at once (R3.2). Delivered → removed, spool cleaned, owner notified with the
+ * title (R6.2, R5.2). Transient failure → `recordFailure` schedules the next step silently (R6.3),
+ * or gives up past the window: spool cleaned and owner told the last error (R4, R6.4). A permanent
+ * failure on a retry is removed and reported.
+ *
+ * All download/upload work, from requests and retries alike, runs one at a time through a single
+ * promise chain: AO3 sees one request at a time and two scp never race for the Kindle.
  */
-export function createRequestHandler(
-  config: RequestConfig,
-  overrides: Partial<RequestDeps> = {},
-): (text: string, reply: (text: string) => Promise<unknown>) => Promise<void> {
-  const deps: RequestDeps = { ...defaultDeps, ...overrides };
-  const { logger } = deps;
+export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipeline {
+  const { logger, spool, queue } = deps;
+  const windowMinutes = Math.round(config.giveUpAfterMs / 60_000);
 
   const uploadOptions: UploadOptions = {
     sshKeyPath: config.sshKeyPath,
@@ -93,15 +107,36 @@ export function createRequestHandler(
     timeoutMs: config.uploadTimeoutMs,
   };
 
-  return async (text, reply) => {
-    /** A failed Telegram send is logged and ignored: it must not abort the fic's delivery. */
-    const say = async (message: string): Promise<void> => {
-      try {
-        await reply(message);
-      } catch (err) {
-        logger.warn("could not send a Telegram message", { error: err });
-      }
-    };
+  let chain: Promise<unknown> = Promise.resolve();
+  /** Runs `work` after every earlier piece of work has finished. */
+  const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
+    const result = chain.then(work, work);
+    chain = result.catch(() => undefined);
+    return result;
+  };
+
+  /** A failed Telegram send is logged and ignored: it must not abort a delivery. */
+  const safely = async (send: Send, message: string): Promise<void> => {
+    try {
+      await send(message);
+    } catch (err) {
+      logger.warn("could not send a Telegram message", { error: err });
+    }
+  };
+
+  const discard = async (id: string): Promise<void> => {
+    await spool.discard(id).catch((err: unknown) => {
+      logger.warn("could not clean the spool", { id, error: err });
+    });
+  };
+
+  const download = async (id: string, url: string): Promise<DownloadResult> => {
+    const dir = await spool.prepare(id);
+    return deps.download(url, dir, { timeoutMs: config.downloadTimeoutMs });
+  };
+
+  const handle = async (text: string, reply: Send): Promise<void> => {
+    const say = (message: string) => safely(reply, message);
 
     const link = extractWorkLink(text);
     if (!link.ok) {
@@ -110,44 +145,106 @@ export function createRequestHandler(
     }
 
     await say(messages.ack);
-    logger.info("request accepted", { workId: link.workId });
+    const id = deps.newId();
+    logger.info("request accepted", { workId: link.workId, id });
 
-    let dir: string | undefined;
-    let title: string | undefined;
-    try {
-      dir = await deps.makeTempDir();
-      const result = await deps.download(link.canonicalUrl, dir, {
-        timeoutMs: config.downloadTimeoutMs,
-      });
-      title = result.title;
-      await deps.upload(result.filePath, uploadOptions);
-      logger.info("delivered", { workId: link.workId, title });
-      await say(messages.delivered(result.title));
-    } catch (err) {
-      logger.error("request failed", { workId: link.workId, error: err, stderr: stderrOf(err) });
-      await say(failureMessage(err, title));
-    } finally {
-      if (dir !== undefined) {
-        await deps.removeDir(dir).catch((err: unknown) => {
-          logger.warn("could not remove the temporary directory", { dir, error: err });
-        });
+    await exclusive(async () => {
+      let result: DownloadResult | undefined;
+      try {
+        result = await download(id, link.canonicalUrl);
+        await deps.upload(result.filePath, uploadOptions);
+        logger.info("delivered", { workId: link.workId, title: result.title });
+        await say(messages.delivered(result.title));
+        await discard(id);
+        return;
+      } catch (err) {
+        logger.error("request failed", { workId: link.workId, error: err, stderr: stderrOf(err) });
+        if (classifyFailure(err) === "transient") {
+          try {
+            await queue.enqueue({
+              id,
+              url: link.canonicalUrl,
+              stage: result === undefined ? "download" : "upload",
+              ...(result !== undefined && { epubPath: result.filePath, title: result.title }),
+              error: errorText(err),
+            });
+            logger.info("enqueued", { workId: link.workId, id });
+            await say(
+              result === undefined
+                ? messages.queuedDownload(errorText(err), windowMinutes)
+                : messages.queuedUpload(result.title, errorText(err), windowMinutes),
+            );
+            return;
+          } catch (enqueueErr) {
+            logger.error("could not enqueue", { workId: link.workId, error: enqueueErr });
+          }
+        }
+        await say(failureMessage(err, result?.title));
+        await discard(id);
       }
+    });
+  };
+
+  /** One retry of one item; every outcome ends with the item updated or removed. */
+  const retry = async (item: QueueItem, notify: Send): Promise<void> => {
+    let current = item;
+    try {
+      if (current.stage === "download") {
+        const result = await download(current.id, current.url);
+        current = await queue.promoteToUpload(current.id, result.filePath, result.title);
+      }
+      if (current.epubPath === undefined) throw new Error(`queue item ${current.id} has no EPUB`);
+      await deps.upload(current.epubPath, uploadOptions);
+      logger.info("delivered on retry", { id: current.id, title: current.title });
+      await queue.remove(current.id);
+      await discard(current.id);
+      await safely(notify, messages.delivered(current.title ?? current.url));
+    } catch (err) {
+      logger.warn("retry failed", { id: current.id, error: err, stderr: stderrOf(err) });
+      if (classifyFailure(err) === "permanent") {
+        await queue.remove(current.id);
+        await discard(current.id);
+        await safely(notify, failureMessage(err, current.title));
+        return;
+      }
+      const outcome = await queue.recordFailure(current.id, errorText(err));
+      if (!outcome.giveUp) return;
+      logger.warn("gave up", { id: current.id, lastError: outcome.item.lastError });
+      await discard(current.id);
+      await safely(
+        notify,
+        messages.gaveUp(current.title ?? current.url, outcome.item.lastError, windowMinutes),
+      );
     }
   };
+
+  const processDue = async (due: readonly QueueItem[], notify: Send): Promise<void> => {
+    for (const item of due) {
+      await exclusive(() => retry(item, notify)).catch((err: unknown) => {
+        logger.error("could not process a queued item", { id: item.id, error: err });
+      });
+    }
+  };
+
+  return { handle, processDue };
+}
+
+/** A {@link Send} that writes to the owner's private chat: retries have no message to reply to. */
+export function notifyOwner(bot: Bot, ownerId: number): Send {
+  return (text) => bot.api.sendMessage(ownerId, text);
 }
 
 /**
- * Creates the grammY bot: owner filter first (R1.1), then the single text handler. `grammy` is
- * only for tests (e.g. a preset `botInfo` so no `getMe` call is made).
+ * Creates the grammY bot: owner filter first (R1.1), then the single text handler, which hands the
+ * message to the pipeline. `grammy` is only for tests (e.g. a preset `botInfo` so no `getMe` call is made).
  */
 export function createBot(
-  config: ResolvedConfig,
-  overrides: Partial<RequestDeps> = {},
+  config: Pick<ResolvedConfig, "telegramToken" | "ownerId">,
+  pipeline: Pick<Pipeline, "handle">,
   grammy?: BotConfig<Context>,
 ): Bot {
   const bot = new Bot(config.telegramToken, grammy);
-  const handle = createRequestHandler(config, overrides);
   bot.use(ownerOnly(config.ownerId));
-  bot.on("message:text", (ctx) => handle(ctx.message.text, (text) => ctx.reply(text)));
+  bot.on("message:text", (ctx) => pipeline.handle(ctx.message.text, (text) => ctx.reply(text)));
   return bot;
 }

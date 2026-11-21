@@ -1,5 +1,8 @@
-import { createBot } from "./bot.js";
+import type { Bot } from "grammy";
+import { checkRequiredBinaries } from "./binaries.js";
+import { createBot, notifyOwner, type Send } from "./bot.js";
 import { ConfigError, loadConfig, type ResolvedConfig } from "./config.js";
+import { createDaemon, pollUntilStopped } from "./daemon.js";
 import { logger } from "./logger.js";
 
 /**
@@ -17,7 +20,8 @@ async function loadConfigOrLog(): Promise<ResolvedConfig | undefined> {
 }
 
 /**
- * Daemon entrypoint: load config → build the bot → long polling until SIGINT/SIGTERM.
+ * Daemon entrypoint: load config → restore the retry queue → build the bot → long polling until
+ * SIGINT/SIGTERM. The retry timer is armed once polling has started, so the bot can notify.
  *
  * Exit codes matter to launchd (feature 2, `KeepAlive: { SuccessfulExit: false }`): a requested
  * shutdown exits 0 (not relaunched); a config error or a failed start (bad token, a second
@@ -30,7 +34,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  const bot = createBot(config);
+  // R7.7: a missing fanficfare/scp (typically a trimmed PATH under launchd) is logged here, at
+  // startup, instead of surfacing later as a misleading download error. It only logs.
+  await checkRequiredBinaries(logger);
+
+  // Retries and startup notices go to the owner through the bot, which needs the pipeline first:
+  // the notifier looks the bot up lazily, and nothing is sent before `daemon.start()`.
+  let bot: Bot | undefined;
+  const notify: Send = (text) =>
+    bot === undefined ? Promise.resolve() : notifyOwner(bot, config.ownerId)(text);
+  const daemon = await createDaemon(config, { logger, notify });
+  bot = createBot(config, daemon.pipeline);
 
   // grammY's default would stop the bot on an error thrown by a handler. The request handler never
   // throws, so this is a safety net: log it and keep serving the owner.
@@ -44,13 +58,12 @@ async function main(): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
       logger.info("shutting down", { signal });
-      void bot.stop();
+      daemon.stop();
+      void bot?.stop();
     });
   }
 
-  await bot.start({
-    onStart: (info) => logger.info("bot started, long polling", { username: info.username }),
-  });
+  await pollUntilStopped(bot, daemon, logger);
   logger.info("bot stopped");
 }
 

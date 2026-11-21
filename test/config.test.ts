@@ -64,6 +64,7 @@ describe("loadConfig", () => {
     };
     expect(await loadConfig(await writeConfig({ ...valid, ...overrides }))).toEqual({
       ...valid,
+      ...CONFIG_DEFAULTS,
       ...overrides,
     });
   });
@@ -111,6 +112,52 @@ describe("loadConfig", () => {
   it("rejects an empty remotePath", async () => {
     const problems = await problemsOf(loadConfig(await writeConfig({ ...valid, remotePath: " " })));
     expect(problems[0]).toMatch(/"remotePath"/);
+  });
+
+  it("the retry-queue defaults: queue file and spool under ~/.bookcarrier, 30 min, 1-2-4-8-15 (feature 2)", async () => {
+    const config = await loadConfig(await writeConfig(valid));
+    expect(config.queuePath).toBe(join(homedir(), ".bookcarrier", "queue.json"));
+    expect(config.spoolDir).toBe(join(homedir(), ".bookcarrier", "spool"));
+    expect(config.giveUpAfterMs).toBe(1_800_000);
+    expect(config.retryBackoffMinutes).toEqual([1, 2, 4, 8, 15]);
+  });
+
+  it("accepts retry-queue overrides and expands ~ in their paths", async () => {
+    const config = await loadConfig(
+      await writeConfig({
+        ...valid,
+        queuePath: "~/q/queue.json",
+        spoolDir: "/var/spool/bc",
+        giveUpAfterMs: 3_600_000,
+        retryBackoffMinutes: [5, 10],
+      }),
+    );
+    expect(config.queuePath).toBe(join(homedir(), "q", "queue.json"));
+    expect(config.spoolDir).toBe("/var/spool/bc");
+    expect(config.giveUpAfterMs).toBe(3_600_000);
+    expect(config.retryBackoffMinutes).toEqual([5, 10]);
+  });
+
+  it.each([[[]], [[1, 0]], [[1.5]], ["1,2"]])(
+    "rejects retryBackoffMinutes = %j (must be a non-empty list of positive integers)",
+    async (retryBackoffMinutes) => {
+      const problems = await problemsOf(
+        loadConfig(await writeConfig({ ...valid, retryBackoffMinutes })),
+      );
+      expect(problems).toEqual([
+        '"retryBackoffMinutes" is optional, but if present it must be a non-empty list of positive integers',
+      ]);
+    },
+  );
+
+  it("rejects empty queuePath / spoolDir", async () => {
+    const problems = await problemsOf(
+      loadConfig(await writeConfig({ ...valid, queuePath: "", spoolDir: 3 })),
+    );
+    expect(problems).toEqual([
+      '"queuePath" is optional, but if present it must be a non-empty string',
+      '"spoolDir" is optional, but if present it must be a non-empty string',
+    ]);
   });
 
   it("throws ConfigError if the file does not exist", async () => {
