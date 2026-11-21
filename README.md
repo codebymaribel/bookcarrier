@@ -131,6 +131,40 @@ A few things worth knowing:
 - Only one instance can poll the bot: stop any `pnpm start` before loading the LaunchAgent.
 - Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` and `bookcarrier.err.log` (no rotation).
 
+### 5. Restart the daemon
+
+The daemon reads `~/.bookcarrier/config.json` and loads `dist/` only at startup, so it needs a restart after any change. What to run depends on what changed:
+
+| You changed | Run |
+| --- | --- |
+| The code (`src/`) | `pnpm build`, then the restart command below |
+| `~/.bookcarrier/config.json` | The restart command below (no build needed) |
+| The plist | `bootout`, then `bootstrap` (below) |
+
+Restart the LaunchAgent (stops the running process and starts it again):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.codebymaribel.bookcarrier
+```
+
+After editing the plist, `kickstart` is not enough, because launchd keeps the copy it loaded. Unload it and load it again:
+
+```bash
+launchctl bootout gui/$(id -u)/com.codebymaribel.bookcarrier
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
+```
+
+Check that it came back up:
+
+```bash
+launchctl print gui/$(id -u)/com.codebymaribel.bookcarrier | grep -E 'state|pid|last exit'
+tail -n 20 ~/Library/Logs/Bookcarrier/bookcarrier.err.log
+```
+
+`state = running` with a `pid` means it is up. If it is not, the last lines of `bookcarrier.err.log` say why (for example, a config error names the field).
+
+If you run it with `pnpm start` instead, stop it with `Ctrl+C` and run `pnpm start` again.
+
 ## Using it
 
 Share (or paste) an AO3 work link to the bot, or send it a document as a file. It replies right away and again when it is done.

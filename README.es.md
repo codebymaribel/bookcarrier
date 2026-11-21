@@ -133,6 +133,40 @@ Algunas cosas para tener en cuenta:
 - Solo una instancia puede escuchar el bot: detené cualquier `pnpm start` antes de cargar el LaunchAgent.
 - Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` y `bookcarrier.err.log` (sin rotación).
 
+### 5. Reiniciá el daemon
+
+El daemon lee `~/.bookcarrier/config.json` y carga `dist/` solo al arrancar, así que necesita un reinicio después de cualquier cambio. Qué correr depende de qué cambiaste:
+
+| Cambiaste | Corré |
+| --- | --- |
+| El código (`src/`) | `pnpm build` y después el comando de reinicio de abajo |
+| `~/.bookcarrier/config.json` | El comando de reinicio de abajo (no hace falta build) |
+| El plist | `bootout` y después `bootstrap` (abajo) |
+
+Reiniciar el LaunchAgent (frena el proceso que está corriendo y lo arranca de nuevo):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.codebymaribel.bookcarrier
+```
+
+Si editaste el plist, `kickstart` no alcanza, porque launchd se queda con la copia que cargó. Descargalo y cargalo de nuevo:
+
+```bash
+launchctl bootout gui/$(id -u)/com.codebymaribel.bookcarrier
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
+```
+
+Fijate que haya vuelto a arrancar:
+
+```bash
+launchctl print gui/$(id -u)/com.codebymaribel.bookcarrier | grep -E 'state|pid|last exit'
+tail -n 20 ~/Library/Logs/Bookcarrier/bookcarrier.err.log
+```
+
+`state = running` con un `pid` quiere decir que está andando. Si no, las últimas líneas de `bookcarrier.err.log` dicen por qué (por ejemplo, un error de configuración nombra el campo).
+
+Si lo corrés con `pnpm start`, frenalo con `Ctrl+C` y corré `pnpm start` de nuevo.
+
 ## Cómo se usa
 
 Compartí (o pegá) un link a un work de AO3 con el bot, o mandale un documento como archivo. Responde enseguida y otra vez cuando termina.
