@@ -184,14 +184,18 @@ Feature 2 will be implemented first, so this feature builds on top of its change
 ## To test by hand (not internet research)
 
 - [x] An **EPUB**, a **MOBI** and a **PDF** copied with `scp` to `/mnt/us/documents/books/`: all three open in KOReader, and they do not mix with the fics in `…/books/AO3/`.
-- [x] `ssh … 'test -e <path>'` against the Kindle (dropbear + busybox): confirm exit 0 / 1 for a file that exists / does not exist, and 255 with the Kindle asleep.
+- [x] `ssh … 'test -e <path>'` against the Kindle (dropbear + busybox): confirm exit 0 / 1 for a file that exists / does not exist, and 255 with the Kindle asleep. R: `
+exists → 0
+doesnt exists → 1
+kindle asleep -> 255`
 - [x] A file with **accents** in its name (`Corazón.pdf`): does the name survive on the Kindle's vfat partition, and does `test -e` find it under that same name?
 - [x] A file with **`:`** in its name, without sanitizing: confirm it fails, so the sanitization is justified with evidence. R: error message:
       `scp: dest open "/mnt/us/documents/books/Dune: Messiah.pdf": Bad message
 scp: failed to upload file ./Dune: Messiah.pdf to /mnt/us/documents/books/`
 - [x] A file with **`'`** in its name (`it's.pdf`): the existence check works with the quoting.
 - [x] A **~20 MB PDF**: time the `scp` against `uploadTimeoutMs` (2 min). R: tested with a 19MB file, sending duration 7ms.
-- [x] A file **> 20 MB** sent to the bot: confirm that `file_size` comes in the update, and the exact text of `getFile`'s error.
+- [x] A file **> 20 MB** sent to the bot: confirm that `file_size` comes in the update, and the exact text of `getFile`'s error. R:
+      `{"ok":false,"error_code":400,"description":"Bad Request: file is too big"}%   `
 
 ## Open points
 
