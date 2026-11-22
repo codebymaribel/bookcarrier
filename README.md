@@ -127,7 +127,7 @@ A few things worth knowing:
 - **The node path is the versioned Homebrew one** (`/opt/homebrew/opt/node@24/bin/node`): it survives patch upgrades and does not jump major versions. The nvm path includes the patch version and breaks on update.
 - **Edit the template in `launchd/`, not the installed copy**: `install` overwrites `~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist`.
 - Only one instance can poll the bot: stop any `pnpm start` before installing the LaunchAgent.
-- Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` and `bookcarrier.err.log` (no rotation). `bookcarrierctl logs` shows the last lines of both.
+- Logs: one file, `~/Library/Logs/Bookcarrier/bookcarrier.log` (no rotation), with the daemon's INFO, WARN and ERROR lines in order. `bookcarrierctl logs` shows its last lines. An install from before the single log keeps writing to the old `bookcarrier.out.log` and `bookcarrier.err.log` until you run `bookcarrierctl install` again; the old files are not deleted.
 
 ### 5. Restart the daemon
 
@@ -145,10 +145,10 @@ Check that it came back up:
 
 ```bash
 bookcarrierctl status     # Bookcarrier: running (PID 30046) · 0 in retry queue
-bookcarrierctl logs       # last 50 lines of bookcarrier.out.log and bookcarrier.err.log
+bookcarrierctl logs       # last 50 lines of bookcarrier.log
 ```
 
-`running` with a PID means it is up. If it says `crashed` or `stopped` instead, the last lines of `bookcarrier.err.log` say why (for example, a config error names the field).
+`running` with a PID means it is up. If it says `crashed` or `stopped` instead, the last `WARN`/`ERROR` lines of `bookcarrier.log` say why (for example, a config error names the field).
 
 If you run it with `pnpm start` instead, stop it with `Ctrl+C` and run `pnpm start` again.
 
@@ -164,7 +164,7 @@ If you run it with `pnpm start` instead, stop it with `Ctrl+C` and run `pnpm sta
 | `restart`                  | Stops and starts the daemon again, for example after `pnpm build` (loads the job if it is not loaded).                                                                                                                                                                                                                                                                                                                                                                                              | 0 / 1                     |
 | `install`                  | Installs the LaunchAgent and loads it; run it again to apply template changes (see [Run as a LaunchAgent](#4-run-as-a-launchagent)).                                                                                                                                                                                                                                                                                                                                                                | 0 / 1                     |
 | `uninstall`                | Unloads the job and deletes its plist. Keeps the logs, the queue and the spool.                                                                                                                                                                                                                                                                                                                                                                                                                     | 0 / 1                     |
-| `logs [-f]`                | The last 50 lines of both log files. `-f` (or `--follow`) keeps following them until `Ctrl+C`.                                                                                                                                                                                                                                                                                                                                                                                                      | `tail`'s                  |
+| `logs [-f]`                | The last 50 lines of `bookcarrier.log`. `-f` (or `--follow`) keeps following it until `Ctrl+C`.                                                                                                                                                                                                                                                                                                                                                                                                     | `tail`'s                  |
 | `menubar install <folder>` | Installs the SwiftBar plugin into `<folder>` (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                           | 0 / 1                     |
 | `help`                     | Prints the usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 0                         |
 
@@ -200,7 +200,7 @@ The icon has a different symbol for each state, so it does not depend on color:
 
 - The second line shows the retry queue split by stage: `Retry queue: 1 to download · 1 to send` (both parts always, even when one is 0), `Retry queue: empty` when it has no items, or `Retry queue unreadable`.
 - Actions run the matching `bookcarrierctl` command in the background (no Terminal window) and refresh the menu right after.
-- Every menu also has **Open logs** (`bookcarrier.out.log` in Console), **Open spool folder** (`~/.bookcarrier/spool` in Finder) and **Open queue file**.
+- Every menu also has **Open logs** (`bookcarrier.log` in Console), **Open spool folder** (`~/.bookcarrier/spool` in Finder) and **Open queue file**.
 - The plugin refreshes every 10 seconds (the `10s` in its name). A state-changing `bookcarrierctl` command run in the terminal also refreshes it at once.
 - To start SwiftBar at login, use SwiftBar's own "Launch at login" setting.
 

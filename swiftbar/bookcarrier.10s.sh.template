@@ -16,7 +16,7 @@ set -euo pipefail
 
 CTL="${BOOKCARRIER_CTL:-__REPO__/bin/bookcarrierctl}"   # override for tests
 OPEN="/usr/bin/open"
-LOG_FILE="$HOME/Library/Logs/Bookcarrier/bookcarrier.out.log"
+LOG_FILE="$HOME/Library/Logs/Bookcarrier/bookcarrier.log"
 SPOOL_DIR="$HOME/.bookcarrier/spool"
 QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
 

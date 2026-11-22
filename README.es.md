@@ -129,7 +129,7 @@ Algunas cosas para tener en cuenta:
 - **La ruta de node es la de Homebrew con versión** (`/opt/homebrew/opt/node@24/bin/node`): sobrevive a las actualizaciones de parche y no salta de versión mayor. La ruta de nvm incluye la versión de parche y se rompe al actualizar.
 - **Editá la plantilla de `launchd/`, no la copia instalada**: `install` sobrescribe `~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist`.
 - Solo una instancia puede escuchar el bot: detené cualquier `pnpm start` antes de instalar el LaunchAgent.
-- Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` y `bookcarrier.err.log` (sin rotación). `bookcarrierctl logs` muestra las últimas líneas de los dos.
+- Logs: un solo archivo, `~/Library/Logs/Bookcarrier/bookcarrier.log` (sin rotación), con las líneas INFO, WARN y ERROR del demonio en orden. `bookcarrierctl logs` muestra sus últimas líneas. Una instalación de antes del log único sigue escribiendo en los viejos `bookcarrier.out.log` y `bookcarrier.err.log` hasta que volvés a correr `bookcarrierctl install`; los archivos viejos no se borran.
 
 ### 5. Reiniciá el daemon
 
@@ -147,10 +147,10 @@ Fijate que haya vuelto a arrancar:
 
 ```bash
 bookcarrierctl status     # Bookcarrier: running (PID 30046) · 0 in retry queue
-bookcarrierctl logs       # últimas 50 líneas de bookcarrier.out.log y bookcarrier.err.log
+bookcarrierctl logs       # últimas 50 líneas de bookcarrier.log
 ```
 
-`running` con un PID quiere decir que está andando. Si dice `crashed` o `stopped`, las últimas líneas de `bookcarrier.err.log` dicen por qué (por ejemplo, un error de configuración nombra el campo).
+`running` con un PID quiere decir que está andando. Si dice `crashed` o `stopped`, las últimas líneas `WARN`/`ERROR` de `bookcarrier.log` dicen por qué (por ejemplo, un error de configuración nombra el campo).
 
 Si lo corrés con `pnpm start`, frenalo con `Ctrl+C` y corré `pnpm start` de nuevo.
 
@@ -166,7 +166,7 @@ Si lo corrés con `pnpm start`, frenalo con `Ctrl+C` y corré `pnpm start` de nu
 | `restart` | Frena el demonio y lo arranca de nuevo, por ejemplo después de `pnpm build` (carga el job si no está cargado). | 0 / 1 |
 | `install` | Instala el LaunchAgent y lo carga; volvé a correrlo para aplicar cambios a la plantilla (ver [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent)). | 0 / 1 |
 | `uninstall` | Descarga el job y borra su plist. Conserva los logs, la cola y el spool. | 0 / 1 |
-| `logs [-f]` | Las últimas 50 líneas de los dos archivos de log. `-f` (o `--follow`) los sigue hasta `Ctrl+C`. | la de `tail` |
+| `logs [-f]` | Las últimas 50 líneas de `bookcarrier.log`. `-f` (o `--follow`) lo sigue hasta `Ctrl+C`. | la de `tail` |
 | `menubar install <carpeta>` | Instala el plugin de SwiftBar en `<carpeta>` (ver abajo). | 0 / 1 |
 | `help` | Muestra el uso. | 0 |
 
@@ -204,7 +204,7 @@ El ícono tiene un símbolo distinto para cada estado, así que no depende del c
 
 - La segunda línea muestra la cola de reintentos separada por etapa: `Retry queue: 1 to download · 1 to send` (siempre las dos partes, aunque una sea 0), `Retry queue: empty` cuando no tiene pedidos, o `Retry queue unreadable`.
 - Las acciones corren el comando de `bookcarrierctl` correspondiente en segundo plano (sin ventana de Terminal) y refrescan el menú enseguida.
-- Todos los menús tienen además **Open logs** (`bookcarrier.out.log` en Console), **Open spool folder** (`~/.bookcarrier/spool` en Finder) y **Open queue file**.
+- Todos los menús tienen además **Open logs** (`bookcarrier.log` en Console), **Open spool folder** (`~/.bookcarrier/spool` en Finder) y **Open queue file**.
 - El plugin se refresca cada 10 segundos (el `10s` de su nombre). Un comando de `bookcarrierctl` que cambia el estado, corrido en la terminal, también lo refresca en el momento.
 - Para que SwiftBar arranque al iniciar sesión, usá su propia opción "Launch at login".
 

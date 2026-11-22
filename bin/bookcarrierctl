@@ -41,8 +41,9 @@ PLIST_TEMPLATE="$REPO/launchd/$LABEL.plist"
 PLUGIN_TEMPLATE="$REPO/swiftbar/bookcarrier.10s.sh.template"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/Bookcarrier"
-OUT_LOG="$LOG_DIR/bookcarrier.out.log"
-ERR_LOG="$LOG_DIR/bookcarrier.err.log"
+# One file for the daemon's stdout and stderr (R3.5). Logs of earlier installs
+# (bookcarrier.out.log / bookcarrier.err.log) are left where they are.
+LOG_FILE="$LOG_DIR/bookcarrier.log"
 NODE="${BOOKCARRIER_NODE:-/opt/homebrew/opt/node@24/bin/node}"
 QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
 STOP_TIMEOUT="${BOOKCARRIER_STOP_TIMEOUT:-15}"
@@ -64,7 +65,7 @@ Commands:
   restart                  Restart the daemon (e.g. after pnpm build)
   install                  Install the LaunchAgent and load it
   uninstall                Unload the LaunchAgent and delete its plist (keeps logs, queue and spool)
-  logs [-f|--follow]       Show the last lines of both logs; -f keeps following them
+  logs [-f|--follow]       Show the last lines of bookcarrier.log; -f keeps following it
   menubar install <dir>    Install the SwiftBar plugin into <dir>
   help                     Show this help
 EOF
@@ -363,9 +364,9 @@ cmd_logs() {
     shift
   done
   if [ "$follow" = "1" ]; then
-    exec "$TAIL" -F -n 50 "$OUT_LOG" "$ERR_LOG"
+    exec "$TAIL" -F -n 50 "$LOG_FILE"
   fi
-  exec "$TAIL" -n 50 "$OUT_LOG" "$ERR_LOG"
+  exec "$TAIL" -n 50 "$LOG_FILE"
 }
 
 cmd_menubar() {

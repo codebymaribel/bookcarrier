@@ -35,7 +35,7 @@ Commands:
   restart                  Restart the daemon (e.g. after pnpm build)
   install                  Install the LaunchAgent and load it
   uninstall                Unload the LaunchAgent and delete its plist (keeps logs, queue and spool)
-  logs [-f|--follow]       Show the last lines of both logs; -f keeps following them
+  logs [-f|--follow]       Show the last lines of bookcarrier.log; -f keeps following it
   menubar install <dir>    Install the SwiftBar plugin into <dir>
   help                     Show this help
 `;
@@ -491,10 +491,27 @@ describe("T3 — install, uninstall (R3)", () => {
     expect(written).toBe(template.replaceAll("__REPO__", repo).replaceAll("__HOME__", home));
     expect(written).not.toMatch(/__REPO__|__HOME__/);
     expect(written).toContain(`<string>${repo}/dist/index.js</string>`);
-    expect(written).toContain(`<string>${home}/Library/Logs/Bookcarrier/bookcarrier.out.log</string>`);
+    expect(written).toContain(
+      `<key>StandardOutPath</key>\n  <string>${home}/Library/Logs/Bookcarrier/bookcarrier.log</string>`,
+    );
+    expect(written).toContain(
+      `<key>StandardErrorPath</key>\n  <string>${home}/Library/Logs/Bookcarrier/bookcarrier.log</string>`,
+    );
+    expect(written).not.toMatch(/bookcarrier\.(out|err)\.log/);
     expect(statSync(logDir).isDirectory()).toBe(true);
     expect(lines("plutil.log")).toEqual([expect.stringMatching(new RegExp(`^-lint ${dirname(plist)}/\\.${LABEL}\\.\\w{6}$`))]);
     expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("install leaves the logs of an earlier install where they are (R3.5)", () => {
+    const repo = tempRepo();
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(join(logDir, "bookcarrier.out.log"), "old out\n");
+    writeFileSync(join(logDir, "bookcarrier.err.log"), "old err\n");
+    const before = snapshot(logDir);
+
+    expect(run(["install"], { script: join(repo, "bin", "bookcarrierctl"), env: nodeEnv() }).code).toBe(0);
+    expect(snapshot(logDir)).toEqual(before);
   });
 
   it("reinstall with an invalid template leaves the old plist and the running job alone (R3.3)", () => {
@@ -656,8 +673,7 @@ describe("T3 — install, uninstall (R3)", () => {
     installPlist();
     loaded("running");
     mkdirSync(logDir, { recursive: true });
-    writeFileSync(join(logDir, "bookcarrier.out.log"), "out\n");
-    writeFileSync(join(logDir, "bookcarrier.err.log"), "err\n");
+    writeFileSync(join(logDir, "bookcarrier.log"), "log\n");
     mkdirSync(join(home, ".bookcarrier", "spool"), { recursive: true });
     writeFileSync(join(home, ".bookcarrier", "queue.json"), '{"version":1,"items":[]}');
     writeFileSync(join(home, ".bookcarrier", "spool", "a.epub"), "epub");
@@ -715,31 +731,27 @@ describe("T4 — logs, usage, errors (R4, R6.3)", () => {
     });
   });
 
-  it("logs prints the last 50 lines of both files (R4.1)", () => {
+  it("logs prints the last 50 lines of bookcarrier.log only (R4.1)", () => {
     mkdirSync(logDir, { recursive: true });
-    const out = Array.from({ length: 60 }, (_, i) => `out ${i + 1}`);
-    writeFileSync(join(logDir, "bookcarrier.out.log"), `${out.join("\n")}\n`);
-    writeFileSync(join(logDir, "bookcarrier.err.log"), "err 1\nerr 2\n");
+    const log = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`);
+    writeFileSync(join(logDir, "bookcarrier.log"), `${log.join("\n")}\n`);
+    // Files from installs before R3.5 are left alone and not shown.
+    writeFileSync(join(logDir, "bookcarrier.out.log"), "old out\n");
+    writeFileSync(join(logDir, "bookcarrier.err.log"), "old err\n");
+    const before = snapshot(logDir);
 
-    expect(run(["logs"])).toEqual({
-      code: 0,
-      stdout:
-        `==> ${logDir}/bookcarrier.out.log <==\n${out.slice(10).join("\n")}\n` +
-        `\n==> ${logDir}/bookcarrier.err.log <==\nerr 1\nerr 2\n`,
-      stderr: "",
-    });
+    expect(run(["logs"])).toEqual({ code: 0, stdout: `${log.slice(10).join("\n")}\n`, stderr: "" });
     expect(calls()).toEqual([]);
+    expect(snapshot(logDir)).toEqual(before);
   });
 
-  it.each(["-f", "--follow"])("logs %s follows both files with tail -F (R4.2)", (flag) => {
+  it.each(["-f", "--follow"])("logs %s follows bookcarrier.log with tail -F (R4.2)", (flag) => {
     expect(run(["logs", flag], { env: { BOOKCARRIER_TAIL: join(fake, "tail") } })).toEqual({
       code: 0,
       stdout: "",
       stderr: "",
     });
-    expect(lines("tail.log")).toEqual([
-      `-F -n 50 ${logDir}/bookcarrier.out.log ${logDir}/bookcarrier.err.log`,
-    ]);
+    expect(lines("tail.log")).toEqual([`-F -n 50 ${logDir}/bookcarrier.log`]);
   });
 
   it.each([

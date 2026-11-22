@@ -55,7 +55,7 @@ function lines(...all: string[]): string {
 
 function openLines(queueFile = join(home, ".bookcarrier", "queue.json")): string[] {
   return [
-    `Open logs | bash=/usr/bin/open param0=-a param1=Console param2=${home}/Library/Logs/Bookcarrier/bookcarrier.out.log terminal=false`,
+    `Open logs | bash=/usr/bin/open param0=-a param1=Console param2=${home}/Library/Logs/Bookcarrier/bookcarrier.log terminal=false`,
     `Open spool folder | bash=/usr/bin/open param0=${home}/.bookcarrier/spool terminal=false`,
     `Open queue file | bash=/usr/bin/open param0=${queueFile} terminal=false`,
   ];
