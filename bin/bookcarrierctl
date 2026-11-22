@@ -1,0 +1,369 @@
+#!/bin/bash
+# bookcarrierctl — the only thing that talks to launchctl for Bookcarrier (feature 4).
+# Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no ${var,,}.
+# See docs/specs/04-control-panel/design.md.
+set -euo pipefail
+
+# --- Repo, resolved from this script's own location, following symlinks (R6.1) -------------
+resolve_repo() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(/usr/bin/dirname "$src")" && pwd)"
+    src="$(/usr/bin/readlink "$src")"
+    case "$src" in
+      /*) ;;
+      *) src="$dir/$src" ;;
+    esac
+  done
+  cd -P "$(/usr/bin/dirname "$src")/.." && pwd
+}
+
+# --- Constants and overridable binaries (R6.2: absolute paths, env overrides for tests) -------
+LABEL="com.codebymaribel.bookcarrier"
+REPO="$(resolve_repo)"
+LAUNCHCTL="${BOOKCARRIER_LAUNCHCTL:-/bin/launchctl}"
+PLUTIL="${BOOKCARRIER_PLUTIL:-/usr/bin/plutil}"
+TAIL="${BOOKCARRIER_TAIL:-/usr/bin/tail}"
+OPEN="${BOOKCARRIER_OPEN:-/usr/bin/open}"
+ID="${BOOKCARRIER_ID:-/usr/bin/id}"
+SED="/usr/bin/sed"
+MKDIR="/bin/mkdir"
+RM="/bin/rm"
+CHMOD="/bin/chmod"
+SLEEP="/bin/sleep"
+CAT="/bin/cat"
+MV="/bin/mv"
+MKTEMP="/usr/bin/mktemp"
+
+DOMAIN="gui/$("$ID" -u)"
+SERVICE="$DOMAIN/$LABEL"
+PLIST_TEMPLATE="$REPO/launchd/$LABEL.plist"
+PLUGIN_TEMPLATE="$REPO/swiftbar/bookcarrier.10s.sh.template"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG_DIR="$HOME/Library/Logs/Bookcarrier"
+OUT_LOG="$LOG_DIR/bookcarrier.out.log"
+ERR_LOG="$LOG_DIR/bookcarrier.err.log"
+NODE="${BOOKCARRIER_NODE:-/opt/homebrew/opt/node@24/bin/node}"
+QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
+STOP_TIMEOUT="${BOOKCARRIER_STOP_TIMEOUT:-15}"
+STOP_POLL="${BOOKCARRIER_STOP_POLL:-0.5}"
+
+NOT_INSTALLED="Bookcarrier is not installed. Run: bookcarrierctl install"
+
+# --- Helpers ------------------------------------------------------------------------------
+
+usage() {
+  "$CAT" >&2 <<'EOF'
+Usage: bookcarrierctl <command>
+
+Commands:
+  status [--porcelain]     Show the daemon state and the retry queue size
+  start                    Start the daemon
+  stop                     Stop the daemon (SIGTERM, waits up to 15 s, never SIGKILL)
+  restart                  Restart the daemon (e.g. after pnpm build)
+  install                  Install the LaunchAgent and load it
+  uninstall                Unload the LaunchAgent and delete its plist (keeps logs, queue and spool)
+  logs [-f|--follow]       Show the last lines of both logs; -f keeps following them
+  menubar install <dir>    Install the SwiftBar plugin into <dir>
+  help                     Show this help
+EOF
+}
+
+# usage_error [message]: optional one-line reason, then the usage; exit 2 (R6.3).
+usage_error() {
+  if [ -n "${1:-}" ]; then echo "$1" >&2; fi
+  usage
+  exit 2
+}
+
+fail() {
+  echo "$1" >&2
+  exit 1
+}
+
+# Escapes a string for use as the replacement of a `sed s|…|…|g`.
+# Escapes the XML special characters of a value placed inside a plist <string>.
+xml_escape() {
+  printf '%s' "$1" | "$SED" -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+sed_escape() {
+  printf '%s' "$1" | "$SED" -e 's/[\\&|]/\\&/g'
+}
+
+# Tells SwiftBar to redraw the plugin now; any error is ignored.
+refresh_swiftbar() {
+  if [ "${BOOKCARRIER_NO_SWIFTBAR_REFRESH:-}" = "1" ]; then return 0; fi
+  "$OPEN" -g "swiftbar://refreshplugin?name=bookcarrier" >/dev/null 2>&1 || true
+}
+
+# job_state → prints "<state> <pid|-> <last_exit|->" (R1.1). The only reader of launchd state.
+job_state() {
+  local out pid last_exit
+  if ! out="$("$LAUNCHCTL" list "$LABEL" 2>/dev/null)"; then
+    if [ -f "$PLIST" ]; then echo "not-loaded - -"; else echo "not-installed - -"; fi
+    return 0
+  fi
+  pid="$(printf '%s\n' "$out" | "$SED" -n 's/^[[:space:]]*"PID" = \([0-9][0-9]*\);.*$/\1/p')"
+  last_exit="$(printf '%s\n' "$out" | "$SED" -n 's/^[[:space:]]*"LastExitStatus" = \(-\{0,1\}[0-9][0-9]*\);.*$/\1/p')"
+  if [ -n "$pid" ]; then
+    echo "running $pid ${last_exit:--}"
+  elif [ -z "$last_exit" ] || [ "$last_exit" = "0" ]; then
+    echo "stopped - ${last_exit:--}"
+  else
+    echo "crashed - $last_exit"
+  fi
+}
+
+# queue_items → "0" when the file is missing, the plutil count when it parses, "?" otherwise (R1.3).
+queue_items() {
+  local count
+  if [ ! -e "$QUEUE_FILE" ]; then
+    echo 0
+  elif count="$("$PLUTIL" -extract items raw -o - "$QUEUE_FILE" 2>/dev/null)" && [ -n "$count" ]; then
+    echo "$count"
+  else
+    echo "?"
+  fi
+}
+
+# --- Commands -----------------------------------------------------------------------------
+
+cmd_status() {
+  local porcelain=0 state pid last_exit items
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --porcelain) porcelain=1 ;;
+      *) usage_error "Unknown option: $1" ;;
+    esac
+    shift
+  done
+  read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+  items="$(queue_items)"
+  if [ "$porcelain" = "1" ]; then
+    printf 'state=%s\npid=%s\nlast_exit=%s\nqueue_items=%s\n' "$state" "$pid" "$last_exit" "$items"
+  else
+    case "$state" in
+      running) printf 'Bookcarrier: running (PID %s) · %s in retry queue\n' "$pid" "$items" ;;
+      crashed) printf 'Bookcarrier: crashed (last exit %s) · %s in retry queue\n' "$last_exit" "$items" ;;
+      *) printf 'Bookcarrier: %s · %s in retry queue\n' "$state" "$items" ;;
+    esac
+  fi
+  if [ "$state" = "running" ]; then return 0; fi
+  return 3
+}
+
+no_args() {
+  if [ $# -gt 0 ]; then usage_error "Unknown option: $1"; fi
+}
+
+cmd_start() {
+  local state pid last_exit
+  read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+  case "$state" in
+    not-installed) fail "$NOT_INSTALLED" ;;
+    running)
+      echo "Bookcarrier is already running (PID $pid)."
+      return 0
+      ;;
+    not-loaded)
+      "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 ||
+        fail "Could not start Bookcarrier. Check: bookcarrierctl logs"
+      ;;
+    *)
+      "$LAUNCHCTL" kickstart "$SERVICE" >/dev/null 2>&1 ||
+        fail "Could not start Bookcarrier. Check: bookcarrierctl logs"
+      ;;
+  esac
+  refresh_swiftbar
+  echo "Started."
+}
+
+cmd_stop() {
+  local state pid last_exit deadline
+  read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+  case "$state" in
+    not-installed) fail "$NOT_INSTALLED" ;;
+    running) ;;
+    *)
+      echo "Bookcarrier is not running."
+      return 0
+      ;;
+  esac
+  # SIGTERM only: the daemon exits 0 and launchd does not relaunch it (feature 2 R7.2).
+  "$LAUNCHCTL" kill SIGTERM "$SERVICE" >/dev/null 2>&1 ||
+    fail "Could not stop Bookcarrier. Check: bookcarrierctl logs"
+  deadline=$((SECONDS + STOP_TIMEOUT))
+  while :; do
+    read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+    if [ "$state" = "crashed" ]; then
+      refresh_swiftbar
+      fail "Bookcarrier exited with an error (last exit $last_exit), so launchd will restart it. Check: bookcarrierctl logs"
+    fi
+    if [ "$state" != "running" ]; then
+      refresh_swiftbar
+      echo "Stopped. launchd will not restart it until you run: bookcarrierctl start"
+      return 0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then break; fi
+    "$SLEEP" "$STOP_POLL"
+  done
+  refresh_swiftbar
+  fail "Bookcarrier is still running after $STOP_TIMEOUT seconds (PID $pid). It was not force-killed; check: bookcarrierctl logs"
+}
+
+cmd_restart() {
+  local state pid last_exit
+  read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+  case "$state" in
+    not-installed) fail "$NOT_INSTALLED" ;;
+    not-loaded)
+      # Nothing loaded to kickstart: loading it starts it (RunAtLoad).
+      "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 ||
+        fail "Could not restart Bookcarrier. Check: bookcarrierctl logs"
+      ;;
+    *)
+      "$LAUNCHCTL" kickstart -k "$SERVICE" >/dev/null 2>&1 ||
+        fail "Could not restart Bookcarrier. Check: bookcarrierctl logs"
+      ;;
+  esac
+  refresh_swiftbar
+  echo "Restarted."
+}
+
+cmd_install() {
+  local missing=0 state pid last_exit lint_out tmp_plist
+  # R3.2: refuse before touching anything.
+  if [ ! -x "$NODE" ]; then
+    echo "Cannot install: Node 24 not found at $NODE. Run: brew install node@24" >&2
+    missing=1
+  fi
+  if [ ! -f "$REPO/dist/index.js" ]; then
+    echo "Cannot install: $REPO/dist/index.js not found. Run: pnpm build" >&2
+    missing=1
+  fi
+  if [ "$missing" = "1" ]; then exit 1; fi
+  [ -f "$PLIST_TEMPLATE" ] || fail "Cannot install: template not found: $PLIST_TEMPLATE"
+
+  # Build and lint the new plist next to the old one before touching the running job, so an
+  # invalid template leaves both the installed plist and the job as they were (R3.3).
+  "$MKDIR" -p "$HOME/Library/LaunchAgents"
+  tmp_plist="$("$MKTEMP" "$HOME/Library/LaunchAgents/.$LABEL.XXXXXX")" ||
+    fail "Cannot install: could not write to $HOME/Library/LaunchAgents"
+  trap '"$RM" -f "$tmp_plist"' EXIT
+  "$SED" -e "s|__REPO__|$(sed_escape "$(xml_escape "$REPO")")|g" \
+    -e "s|__HOME__|$(sed_escape "$(xml_escape "$HOME")")|g" \
+    "$PLIST_TEMPLATE" >"$tmp_plist"
+  if ! lint_out="$("$PLUTIL" -lint "$tmp_plist" 2>&1)"; then
+    fail "Cannot install: the generated plist is not valid: $lint_out Nothing was changed."
+  fi
+
+  read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+  # R3.3: an existing install is replaced and reloaded.
+  case "$state" in
+    not-installed | not-loaded) ;;
+    *)
+      "$LAUNCHCTL" bootout "$SERVICE" >/dev/null 2>&1 ||
+        fail "Could not unload the running Bookcarrier; nothing was changed."
+      ;;
+  esac
+
+  "$CHMOD" 644 "$tmp_plist"
+  "$MV" -f "$tmp_plist" "$PLIST"
+  trap - EXIT
+  "$MKDIR" -p "$LOG_DIR"
+  "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 ||
+    fail "Installed $PLIST but could not load it. Check: bookcarrierctl logs"
+  refresh_swiftbar
+  echo "Installed $PLIST and loaded it. Check it with: bookcarrierctl status"
+}
+
+cmd_uninstall() {
+  local state pid last_exit
+  read -r state pid last_exit <<EOF
+$(job_state)
+EOF
+  case "$state" in
+    not-installed)
+      echo "Bookcarrier is not installed."
+      return 0
+      ;;
+    not-loaded) ;;
+    *)
+      "$LAUNCHCTL" bootout "$SERVICE" >/dev/null 2>&1 ||
+        fail "Could not unload Bookcarrier; the plist was kept."
+      ;;
+  esac
+  # R3.4: only the plist goes; logs, queue and spool stay.
+  "$RM" -f "$PLIST"
+  refresh_swiftbar
+  echo "Uninstalled. Logs, queue and spool were kept."
+}
+
+cmd_logs() {
+  local follow=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -f | --follow) follow=1 ;;
+      *) usage_error "Unknown option: $1" ;;
+    esac
+    shift
+  done
+  if [ "$follow" = "1" ]; then
+    exec "$TAIL" -F -n 50 "$OUT_LOG" "$ERR_LOG"
+  fi
+  exec "$TAIL" -n 50 "$OUT_LOG" "$ERR_LOG"
+}
+
+cmd_menubar() {
+  local dir target
+  if [ "${1:-}" != "install" ]; then usage_error "Unknown command: menubar${1:+ $1}"; fi
+  shift
+  if [ $# -eq 0 ]; then usage_error "Missing the SwiftBar plugin folder."; fi
+  dir="$1"
+  shift
+  no_args "$@"
+  [ -d "$dir" ] || fail "Plugin folder not found: $dir"
+  [ -f "$PLUGIN_TEMPLATE" ] || fail "Plugin template not found: $PLUGIN_TEMPLATE"
+  target="${dir%/}/bookcarrier.10s.sh"
+  "$SED" -e "s|__REPO__|$(sed_escape "$REPO")|g" "$PLUGIN_TEMPLATE" >"$target"
+  "$CHMOD" +x "$target"
+  echo "Installed the menu bar plugin: $target"
+}
+
+# --- Dispatch -----------------------------------------------------------------------------
+
+main() {
+  if [ $# -eq 0 ]; then usage_error; fi
+  local command="$1"
+  shift
+  case "$command" in
+    status) cmd_status "$@" ;;
+    start) no_args "$@"; cmd_start ;;
+    stop) no_args "$@"; cmd_stop ;;
+    restart) no_args "$@"; cmd_restart ;;
+    install) no_args "$@"; cmd_install ;;
+    uninstall) no_args "$@"; cmd_uninstall ;;
+    logs) cmd_logs "$@" ;;
+    menubar) cmd_menubar "$@" ;;
+    help | -h | --help)
+      no_args "$@"
+      usage
+      ;;
+    *) usage_error "Unknown command: $command" ;;
+  esac
+}
+
+main "$@"

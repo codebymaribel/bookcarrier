@@ -1,0 +1,12 @@
+{
+	"LimitLoadToSessionType" = "Aqua";
+	"Label" = "com.codebymaribel.bookcarrier";
+	"OnDemand" = false;
+	"LastExitStatus" = 0;
+	"PID" = 30046;
+	"Program" = "/opt/homebrew/opt/node@24/bin/node";
+	"ProgramArguments" = (
+		"/opt/homebrew/opt/node@24/bin/node";
+		"/Users/owner/bookcarrier/dist/index.js";
+	);
+};

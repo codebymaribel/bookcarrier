@@ -1,0 +1,129 @@
+#!/bin/bash
+# <xbar.title>Bookcarrier</xbar.title>
+# <xbar.desc>Start, stop and check the Bookcarrier daemon.</xbar.desc>
+# <swiftbar.hideAbout>true</swiftbar.hideAbout>
+# <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
+# <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
+# <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
+#
+# SwiftBar plugin for Bookcarrier (feature 4, R5). Installed by
+# `bookcarrierctl menubar install <plugins-folder>`, which fills in the repo path.
+# It only calls `bookcarrierctl status --porcelain`; every action goes through
+# bookcarrierctl too, so this script never talks to launchctl.
+# Bash 3.2 compatible (macOS /bin/bash). No PATH lookups: SwiftBar does not run
+# plugins with the owner's interactive PATH (R6.2).
+set -euo pipefail
+
+CTL="${BOOKCARRIER_CTL:-__REPO__/bin/bookcarrierctl}"   # override for tests
+OPEN="/usr/bin/open"
+LOG_FILE="$HOME/Library/Logs/Bookcarrier/bookcarrier.out.log"
+SPOOL_DIR="$HOME/.bookcarrier/spool"
+QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
+
+# Prints the lines that open the logs, the spool and the queue (R5.5).
+print_open_items() {
+  echo "Open logs | bash=$OPEN param0=-a param1=Console param2=$LOG_FILE terminal=false"
+  echo "Open spool folder | bash=$OPEN param0=$SPOOL_DIR terminal=false"
+  echo "Open queue file | bash=$OPEN param0=$QUEUE_FILE terminal=false"
+}
+
+# Prints the whole menu for an error: warning icon plus the message (R5.7).
+# A "|" in the message would start SwiftBar parameters, so it becomes "/".
+print_error() {
+  local message="${1//|//}"
+  echo "| sfimage=questionmark.circle"
+  echo "---"
+  echo "$message"
+  echo "---"
+  print_open_items
+}
+
+# Prints one menu line that runs a bookcarrierctl command in the background (R5.4).
+print_action() {
+  echo "$1 | bash=$CTL param0=$2 terminal=false refresh=true"
+}
+
+if [ ! -f "$CTL" ] || [ ! -x "$CTL" ]; then
+  print_error "bookcarrierctl not found or not executable: $CTL"
+  exit 0
+fi
+
+# Exit 3 just means "not running" (R1.5); anything else but 0 is a failure.
+code=0
+output="$("$CTL" status --porcelain 2>&1)" || code=$?
+if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then
+  first_line="${output%%$'\n'*}"
+  if [ -n "$first_line" ]; then
+    print_error "bookcarrierctl status failed (exit $code): $first_line"
+  else
+    print_error "bookcarrierctl status failed (exit $code)"
+  fi
+  exit 0
+fi
+
+state=""
+pid="-"
+last_exit="-"
+queue_items="?"
+while IFS= read -r line; do
+  case "$line" in
+    state=*) state="${line#state=}" ;;
+    pid=*) pid="${line#pid=}" ;;
+    last_exit=*) last_exit="${line#last_exit=}" ;;
+    queue_items=*) queue_items="${line#queue_items=}" ;;
+  esac
+done <<EOF
+$output
+EOF
+
+case "$state" in
+  running)
+    icon="book.fill"
+    title="Running · PID $pid"
+    ;;
+  stopped | not-loaded)
+    icon="book"
+    title="Stopped"
+    ;;
+  crashed)
+    icon="exclamationmark.triangle.fill"
+    title="Crashed (last exit $last_exit) — launchd will retry"
+    ;;
+  not-installed)
+    icon="book.closed"
+    title="Not installed"
+    ;;
+  "")
+    print_error "bookcarrierctl status gave no state"
+    exit 0
+    ;;
+  *)
+    print_error "bookcarrierctl status gave an unknown state: $state"
+    exit 0
+    ;;
+esac
+
+echo "| sfimage=$icon"
+echo "---"
+echo "$title"
+if [ "$queue_items" = "?" ]; then
+  echo "Retry queue unreadable"
+else
+  echo "$queue_items in retry queue"
+fi
+echo "---"
+# Only the actions that make sense in this state (R5.3).
+case "$state" in
+  running)
+    print_action "Stop" "stop"
+    print_action "Restart" "restart"
+    ;;
+  not-installed)
+    print_action "Install" "install"
+    ;;
+  *)
+    print_action "Start" "start"
+    ;;
+esac
+echo "---"
+print_open_items
