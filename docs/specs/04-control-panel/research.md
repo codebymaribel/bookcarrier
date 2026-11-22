@@ -39,6 +39,7 @@ Checked on the owner's Mac (macOS, Apple Silicon) on 2026-11-20, with the featur
   | succeeds | absent | ≠ 0 | `crashed` |
 
 - **To confirm by hand during T1:** how `LastExitStatus` encodes a death by signal (e.g. `kill -9`). launchd usually reports it as the raw wait status, not 137. Any non-zero value is `crashed`, so the exact number only matters for the message.
+  - **Confirmed by the owner on 2026-11-22:** after `kill -9`, `launchctl list` reports `"LastExitStatus" = 9;` (the signal number), so `bookcarrierctl` shows `crashed (last exit 9)`. A daemon that had been running for more than `ThrottleInterval` (10 s) is relaunched at once, so the `crashed` state is only visible when it dies twice within 10 s.
 - Commands, modern syntax (macOS 12+):
   - `launchctl bootstrap gui/$UID <plist>`: load. Starts at once because of `RunAtLoad`.
   - `launchctl bootout gui/$UID/<label>`: unload.
