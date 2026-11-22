@@ -117,7 +117,7 @@ function loaded(state: "running" | "stopped" | "crashed"): void {
   copyFileSync(join(FIXTURES, `list-${state}.txt`), join(fake, "list.out"));
 }
 
-function afterKill(state: "running" | "stopped"): void {
+function afterKill(state: "running" | "stopped" | "crashed"): void {
   copyFileSync(join(FIXTURES, `list-${state}.txt`), join(fake, "list.after-kill"));
 }
 
@@ -139,8 +139,8 @@ function installPlist(content = "existing plist\n"): void {
 }
 
 /** A copy of the repo layout the script needs, so REPO resolves to a temp dir. */
-function tempRepo(options: { dist?: boolean; plugin?: string } = {}): string {
-  const repo = join(root, "repo");
+function tempRepo(options: { dist?: boolean; plugin?: string; name?: string } = {}): string {
+  const repo = join(root, options.name ?? "repo");
   mkdirSync(join(repo, "bin"), { recursive: true });
   copyFileSync(SCRIPT, join(repo, "bin", "bookcarrierctl"));
   chmodSync(join(repo, "bin", "bookcarrierctl"), 0o755);
@@ -345,6 +345,19 @@ describe("T2 — start, stop, restart (R2)", () => {
     expect(calls()).toEqual([`list ${LABEL}`, `kill SIGTERM ${SERVICE}`, `list ${LABEL}`]);
   });
 
+  it("stop: the daemon exits with an error → exit 1, says launchd will relaunch it", () => {
+    installPlist();
+    loaded("running");
+    afterKill("crashed");
+
+    expect(run(["stop"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Bookcarrier exited with an error (last exit 9), so launchd will restart it. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `kill SIGTERM ${SERVICE}`, `list ${LABEL}`]);
+  });
+
   it("stop: PID stays → exit 1 after the (shortened) wait, never SIGKILL", () => {
     installPlist();
     loaded("running");
@@ -425,8 +438,42 @@ describe("T3 — install, uninstall (R3)", () => {
     expect(written).toContain(`<string>${repo}/dist/index.js</string>`);
     expect(written).toContain(`<string>${home}/Library/Logs/Bookcarrier/bookcarrier.out.log</string>`);
     expect(statSync(logDir).isDirectory()).toBe(true);
-    expect(lines("plutil.log")).toEqual([`-lint ${plist}`]);
+    expect(lines("plutil.log")).toEqual([expect.stringMatching(new RegExp(`^-lint ${dirname(plist)}/\\.${LABEL}\\.\\w{6}$`))]);
     expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("reinstall with an invalid template leaves the old plist and the running job alone (R3.3)", () => {
+    const repo = tempRepo();
+    const template = join(repo, "launchd", `${LABEL}.plist`);
+    writeFileSync(template, readFileSync(template, "utf8").replace("<key>RunAtLoad</key>", "<key>RunAtLoad</key><oops>"));
+    installPlist("old plist\n");
+    loaded("running");
+
+    const result = run(["install"], { script: join(repo, "bin", "bookcarrierctl"), env: nodeEnv() });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/^Cannot install: the generated plist is not valid: .+ Nothing was changed\.\n$/s);
+    expect(readFileSync(plist, "utf8")).toBe("old plist\n");
+    expect(readdirSync(dirname(plist))).toEqual([`${LABEL}.plist`]);
+    expect(calls()).toEqual([]);
+  });
+
+  it("install escapes XML and keeps spaces, & and | in the repo path (R3.1)", () => {
+    const repo = tempRepo({ name: "my repo & R|D <x>" });
+
+    const result = run(["install"], { script: join(repo, "bin", "bookcarrierctl"), env: nodeEnv() });
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: `Installed ${plist} and loaded it. Check it with: bookcarrierctl status\n`,
+      stderr: "",
+    });
+    const argument = spawnSync("/usr/bin/plutil", ["-extract", "ProgramArguments.1", "raw", "-o", "-", plist], {
+      encoding: "utf8",
+    });
+    expect(argument.stdout.trim()).toBe(`${repo}/dist/index.js`);
+    expect(readdirSync(dirname(plist))).toEqual([`${LABEL}.plist`]);
   });
 
   it("install over an existing install → bootout, then bootstrap the new plist (R3.3)", () => {
@@ -547,6 +594,14 @@ describe("T3 — install, uninstall (R3)", () => {
 });
 
 describe("T4 — logs, usage, errors (R4, R6.3)", () => {
+  it("usage works with no binaries in PATH (R6.2)", () => {
+    expect(run(["foo"], { env: { PATH: "/var/empty" } })).toEqual({
+      code: 2,
+      stdout: "",
+      stderr: "Unknown command: foo\n" + USAGE,
+    });
+  });
+
   it("logs prints the last 50 lines of both files (R4.1)", () => {
     mkdirSync(logDir, { recursive: true });
     const out = Array.from({ length: 60 }, (_, i) => `out ${i + 1}`);

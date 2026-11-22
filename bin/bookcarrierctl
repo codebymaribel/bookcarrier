@@ -31,6 +31,9 @@ MKDIR="/bin/mkdir"
 RM="/bin/rm"
 CHMOD="/bin/chmod"
 SLEEP="/bin/sleep"
+CAT="/bin/cat"
+MV="/bin/mv"
+MKTEMP="/usr/bin/mktemp"
 
 DOMAIN="gui/$("$ID" -u)"
 SERVICE="$DOMAIN/$LABEL"
@@ -50,7 +53,7 @@ NOT_INSTALLED="Bookcarrier is not installed. Run: bookcarrierctl install"
 # --- Helpers ------------------------------------------------------------------------------
 
 usage() {
-  cat >&2 <<'EOF'
+  "$CAT" >&2 <<'EOF'
 Usage: bookcarrierctl <command>
 
 Commands:
@@ -79,6 +82,11 @@ fail() {
 }
 
 # Escapes a string for use as the replacement of a `sed s|…|…|g`.
+# Escapes the XML special characters of a value placed inside a plist <string>.
+xml_escape() {
+  printf '%s' "$1" | "$SED" -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
 sed_escape() {
   printf '%s' "$1" | "$SED" -e 's/[\\&|]/\\&/g'
 }
@@ -196,6 +204,10 @@ EOF
     read -r state pid last_exit <<EOF
 $(job_state)
 EOF
+    if [ "$state" = "crashed" ]; then
+      refresh_swiftbar
+      fail "Bookcarrier exited with an error (last exit $last_exit), so launchd will restart it. Check: bookcarrierctl logs"
+    fi
     if [ "$state" != "running" ]; then
       refresh_swiftbar
       echo "Stopped. launchd will not restart it until you run: bookcarrierctl start"
@@ -230,7 +242,7 @@ EOF
 }
 
 cmd_install() {
-  local missing=0 state pid last_exit lint_out
+  local missing=0 state pid last_exit lint_out tmp_plist
   # R3.2: refuse before touching anything.
   if [ ! -x "$NODE" ]; then
     echo "Cannot install: Node 24 not found at $NODE. Run: brew install node@24" >&2
@@ -242,6 +254,19 @@ cmd_install() {
   fi
   if [ "$missing" = "1" ]; then exit 1; fi
   [ -f "$PLIST_TEMPLATE" ] || fail "Cannot install: template not found: $PLIST_TEMPLATE"
+
+  # Build and lint the new plist next to the old one before touching the running job, so an
+  # invalid template leaves both the installed plist and the job as they were (R3.3).
+  "$MKDIR" -p "$HOME/Library/LaunchAgents"
+  tmp_plist="$("$MKTEMP" "$HOME/Library/LaunchAgents/.$LABEL.XXXXXX")" ||
+    fail "Cannot install: could not write to $HOME/Library/LaunchAgents"
+  trap '"$RM" -f "$tmp_plist"' EXIT
+  "$SED" -e "s|__REPO__|$(sed_escape "$(xml_escape "$REPO")")|g" \
+    -e "s|__HOME__|$(sed_escape "$(xml_escape "$HOME")")|g" \
+    "$PLIST_TEMPLATE" >"$tmp_plist"
+  if ! lint_out="$("$PLUTIL" -lint "$tmp_plist" 2>&1)"; then
+    fail "Cannot install: the generated plist is not valid: $lint_out Nothing was changed."
+  fi
 
   read -r state pid last_exit <<EOF
 $(job_state)
@@ -255,13 +280,10 @@ EOF
       ;;
   esac
 
-  "$MKDIR" -p "$HOME/Library/LaunchAgents"
-  "$SED" -e "s|__REPO__|$(sed_escape "$REPO")|g" -e "s|__HOME__|$(sed_escape "$HOME")|g" \
-    "$PLIST_TEMPLATE" >"$PLIST"
+  "$CHMOD" 644 "$tmp_plist"
+  "$MV" -f "$tmp_plist" "$PLIST"
+  trap - EXIT
   "$MKDIR" -p "$LOG_DIR"
-  if ! lint_out="$("$PLUTIL" -lint "$PLIST" 2>&1)"; then
-    fail "Cannot install: the generated plist is not valid: $lint_out"
-  fi
   "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 ||
     fail "Installed $PLIST but could not load it. Check: bookcarrierctl logs"
   refresh_swiftbar
