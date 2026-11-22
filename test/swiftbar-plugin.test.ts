@@ -36,8 +36,8 @@ async function fakeCtl(output: string, code = 0, path = join(dir, "bookcarrierct
   return path;
 }
 
-function porcelain(state: string, pid: string, lastExit: string, queueItems: string): string {
-  return `state=${state}\npid=${pid}\nlast_exit=${lastExit}\nqueue_items=${queueItems}\n`;
+function porcelain(state: string, pid: string, lastExit: string, queueItems: string, download: string, send: string): string {
+  return `state=${state}\npid=${pid}\nlast_exit=${lastExit}\nqueue_items=${queueItems}\nqueue_download=${download}\nqueue_send=${send}\n`;
 }
 
 /** Runs a plugin script with a minimal environment: temp HOME and a PATH with no binaries in it (R6.2). */
@@ -70,8 +70,8 @@ async function calls(): Promise<string> {
 }
 
 describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
-  it("running → book.fill, PID, queue count, Stop and Restart only", async () => {
-    const ctl = await fakeCtl(porcelain("running", "30046", "0", "2"), 0);
+  it("running → book.fill, PID, queue split by stage (1 + 1), Stop and Restart only", async () => {
+    const ctl = await fakeCtl(porcelain("running", "30046", "0", "2", "1", "1"), 0);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
@@ -82,7 +82,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
         "| sfimage=book.fill",
         "---",
         "Running · PID 30046",
-        "2 in retry queue",
+        "Retry queue: 1 to download · 1 to send",
         "---",
         action("Stop", ctl, "stop"),
         action("Restart", ctl, "restart"),
@@ -93,31 +93,31 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
     expect(await calls()).toBe("status --porcelain\n");
   });
 
-  it("stopped (status exits 3, not a failure) → book, Stopped, Start only", async () => {
-    const ctl = await fakeCtl(porcelain("stopped", "-", "0", "0"), 3);
+  it("stopped (status exits 3, not a failure) → book, Stopped, empty queue, Start only", async () => {
+    const ctl = await fakeCtl(porcelain("stopped", "-", "0", "0", "0", "0"), 3);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
     expect(run.status).toBe(0);
     expect(run.stderr).toBe("");
     expect(run.stdout).toBe(
-      lines("| sfimage=book", "---", "Stopped", "0 in retry queue", "---", action("Start", ctl, "start"), "---", ...openLines()),
+      lines("| sfimage=book", "---", "Stopped", "Retry queue: empty", "---", action("Start", ctl, "start"), "---", ...openLines()),
     );
   });
 
   it("not-loaded → same look as stopped, Start only", async () => {
-    const ctl = await fakeCtl(porcelain("not-loaded", "-", "-", "1"), 3);
+    const ctl = await fakeCtl(porcelain("not-loaded", "-", "-", "1", "1", "0"), 3);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
     expect(run.status).toBe(0);
     expect(run.stdout).toBe(
-      lines("| sfimage=book", "---", "Stopped", "1 in retry queue", "---", action("Start", ctl, "start"), "---", ...openLines()),
+      lines("| sfimage=book", "---", "Stopped", "Retry queue: 1 to download · 0 to send", "---", action("Start", ctl, "start"), "---", ...openLines()),
     );
   });
 
   it("crashed → warning triangle with the last exit status, Start only", async () => {
-    const ctl = await fakeCtl(porcelain("crashed", "-", "9", "0"), 3);
+    const ctl = await fakeCtl(porcelain("crashed", "-", "9", "0", "0", "0"), 3);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
@@ -127,7 +127,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
         "| sfimage=exclamationmark.triangle.fill",
         "---",
         "Crashed (last exit 9) — launchd will retry",
-        "0 in retry queue",
+        "Retry queue: empty",
         "---",
         action("Start", ctl, "start"),
         "---",
@@ -137,7 +137,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
   });
 
   it("not-installed → book.closed, Not installed, Install only", async () => {
-    const ctl = await fakeCtl(porcelain("not-installed", "-", "-", "0"), 3);
+    const ctl = await fakeCtl(porcelain("not-installed", "-", "-", "0", "0", "0"), 3);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
@@ -147,7 +147,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
         "| sfimage=book.closed",
         "---",
         "Not installed",
-        "0 in retry queue",
+        "Retry queue: empty",
         "---",
         action("Install", ctl, "install"),
         "---",
@@ -157,7 +157,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
   });
 
   it("an unreadable queue (queue_items=?) → 'Retry queue unreadable'", async () => {
-    const ctl = await fakeCtl(porcelain("running", "12", "0", "?"), 0);
+    const ctl = await fakeCtl(porcelain("running", "12", "0", "?", "?", "?"), 0);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
@@ -177,8 +177,56 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
     );
   });
 
+  it("two items waiting to download, none to send → both parts, the 0 included", async () => {
+    const ctl = await fakeCtl(porcelain("running", "30046", "0", "2", "2", "0"), 0);
+
+    const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toBe(
+      lines(
+        "| sfimage=book.fill",
+        "---",
+        "Running · PID 30046",
+        "Retry queue: 2 to download · 0 to send",
+        "---",
+        action("Stop", ctl, "stop"),
+        action("Restart", ctl, "restart"),
+        "---",
+        ...openLines(),
+      ),
+    );
+  });
+
+  it.each([
+    { name: "the stage keys missing (older bookcarrierctl)", output: "state=running\npid=12\nlast_exit=0\nqueue_items=2\n" },
+    { name: "queue_download=?", output: porcelain("running", "12", "0", "2", "?", "1") },
+    { name: "queue_send=?", output: porcelain("running", "12", "0", "2", "1", "?") },
+  ])("$name → 'Retry queue unreadable'", async ({ output }) => {
+    const ctl = await fakeCtl(output, 0);
+
+    const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
+
+    expect(run.status).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toBe(
+      lines(
+        "| sfimage=book.fill",
+        "---",
+        "Running · PID 12",
+        "Retry queue unreadable",
+        "---",
+        action("Stop", ctl, "stop"),
+        action("Restart", ctl, "restart"),
+        "---",
+        ...openLines(),
+      ),
+    );
+  });
+
   it("Open queue file follows BOOKCARRIER_QUEUE_FILE, like bookcarrierctl", async () => {
-    const ctl = await fakeCtl(porcelain("stopped", "-", "0", "0"), 3);
+    const ctl = await fakeCtl(porcelain("stopped", "-", "0", "0", "0", "0"), 3);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl, BOOKCARRIER_QUEUE_FILE: "/data/custom/queue.json" });
 
@@ -188,7 +236,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
         "| sfimage=book",
         "---",
         "Stopped",
-        "0 in retry queue",
+        "Retry queue: empty",
         "---",
         action("Start", ctl, "start"),
         "---",
@@ -200,7 +248,7 @@ describe("SwiftBar plugin: output per state (R5.1–R5.3)", () => {
 
 describe("SwiftBar plugin: actions and paths (R5.4, R5.5, R6.2)", () => {
   it("every clickable line uses an absolute bash= path and terminal=false; ctl actions also refresh=true", async () => {
-    const ctl = await fakeCtl(porcelain("running", "1", "0", "0"), 0);
+    const ctl = await fakeCtl(porcelain("running", "1", "0", "0", "0", "0"), 0);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 
@@ -219,7 +267,7 @@ describe("SwiftBar plugin: actions and paths (R5.4, R5.5, R6.2)", () => {
   it("without an override it calls __REPO__/bin/bookcarrierctl once the placeholder is filled", async () => {
     const repo = join(dir, "repo");
     await mkdir(join(repo, "bin"), { recursive: true });
-    const ctl = await fakeCtl(porcelain("running", "7", "0", "3"), 0, join(repo, "bin", "bookcarrierctl"));
+    const ctl = await fakeCtl(porcelain("running", "7", "0", "3", "1", "2"), 0, join(repo, "bin", "bookcarrierctl"));
     const filled = join(dir, "bookcarrier.10s.sh");
     await writeFile(filled, (await readFile(TEMPLATE, "utf8")).replaceAll("__REPO__", repo));
     await chmod(filled, 0o755);
@@ -232,7 +280,7 @@ describe("SwiftBar plugin: actions and paths (R5.4, R5.5, R6.2)", () => {
         "| sfimage=book.fill",
         "---",
         "Running · PID 7",
-        "3 in retry queue",
+        "Retry queue: 1 to download · 2 to send",
         "---",
         action("Stop", ctl, "stop"),
         action("Restart", ctl, "restart"),
@@ -284,7 +332,7 @@ describe("SwiftBar plugin: bookcarrierctl missing or failing (R5.7)", () => {
   });
 
   it("ctl present but not executable → same error", async () => {
-    const ctl = await fakeCtl(porcelain("running", "1", "0", "0"), 0);
+    const ctl = await fakeCtl(porcelain("running", "1", "0", "0", "0", "0"), 0);
     await chmod(ctl, 0o644);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
@@ -332,7 +380,7 @@ describe("SwiftBar plugin: bookcarrierctl missing or failing (R5.7)", () => {
   });
 
   it("ctl prints an unknown state → error naming it", async () => {
-    const ctl = await fakeCtl(porcelain("sleeping", "-", "-", "0"), 3);
+    const ctl = await fakeCtl(porcelain("sleeping", "-", "-", "0", "0", "0"), 3);
 
     const run = runPlugin(TEMPLATE, { BOOKCARRIER_CTL: ctl });
 

@@ -128,10 +128,33 @@ queue_items() {
   fi
 }
 
+# queue_stages <items> → "<download> <send>": one plutil call per item reads its stage (R1.3, R5.6).
+# "upload" counts as send; an unreadable, null or unknown stage counts in neither. When the
+# total is not a plain count ("?" or anything else), both are "?".
+queue_stages() {
+  local items="$1" i=0 download=0 send=0 stage
+  case "$items" in
+    '' | *[!0-9]*)
+      echo "? ?"
+      return 0
+      ;;
+  esac
+  while [ "$i" -lt "$items" ]; do
+    if stage="$("$PLUTIL" -extract "items.$i.stage" raw -o - "$QUEUE_FILE" 2>/dev/null)"; then
+      case "$stage" in
+        download) download=$((download + 1)) ;;
+        upload) send=$((send + 1)) ;;
+      esac
+    fi
+    i=$((i + 1))
+  done
+  echo "$download $send"
+}
+
 # --- Commands -----------------------------------------------------------------------------
 
 cmd_status() {
-  local porcelain=0 state pid last_exit items
+  local porcelain=0 state pid last_exit items download send breakdown=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --porcelain) porcelain=1 ;;
@@ -143,13 +166,20 @@ cmd_status() {
 $(job_state)
 EOF
   items="$(queue_items)"
+  read -r download send <<EOF
+$(queue_stages "$items")
+EOF
   if [ "$porcelain" = "1" ]; then
-    printf 'state=%s\npid=%s\nlast_exit=%s\nqueue_items=%s\n' "$state" "$pid" "$last_exit" "$items"
+    printf 'state=%s\npid=%s\nlast_exit=%s\nqueue_items=%s\nqueue_download=%s\nqueue_send=%s\n' \
+      "$state" "$pid" "$last_exit" "$items" "$download" "$send"
   else
+    if [ "$download" != "?" ] && [ "$items" -gt 0 ]; then
+      breakdown=" ($download to download, $send to send)"
+    fi
     case "$state" in
-      running) printf 'Bookcarrier: running (PID %s) · %s in retry queue\n' "$pid" "$items" ;;
-      crashed) printf 'Bookcarrier: crashed (last exit %s) · %s in retry queue\n' "$last_exit" "$items" ;;
-      *) printf 'Bookcarrier: %s · %s in retry queue\n' "$state" "$items" ;;
+      running) printf 'Bookcarrier: running (PID %s) · %s in retry queue%s\n' "$pid" "$items" "$breakdown" ;;
+      crashed) printf 'Bookcarrier: crashed (last exit %s) · %s in retry queue%s\n' "$last_exit" "$items" "$breakdown" ;;
+      *) printf 'Bookcarrier: %s · %s in retry queue%s\n' "$state" "$items" "$breakdown" ;;
     esac
   fi
   if [ "$state" = "running" ]; then return 0; fi

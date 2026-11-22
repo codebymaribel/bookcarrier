@@ -197,11 +197,11 @@ afterEach(() => {
 
 describe("T1 — status (R1, R6.1)", () => {
   it.each([
-    { name: "not-installed", setup: (): void => {}, text: "Bookcarrier: not-installed · 0 in retry queue\n", porcelain: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\n", code: 3 },
-    { name: "not-loaded", setup: (): void => installPlist(), text: "Bookcarrier: not-loaded · 0 in retry queue\n", porcelain: "state=not-loaded\npid=-\nlast_exit=-\nqueue_items=0\n", code: 3 },
-    { name: "running", setup: (): void => { installPlist(); loaded("running"); }, text: "Bookcarrier: running (PID 30046) · 0 in retry queue\n", porcelain: "state=running\npid=30046\nlast_exit=0\nqueue_items=0\n", code: 0 },
-    { name: "stopped", setup: (): void => { installPlist(); loaded("stopped"); }, text: "Bookcarrier: stopped · 0 in retry queue\n", porcelain: "state=stopped\npid=-\nlast_exit=0\nqueue_items=0\n", code: 3 },
-    { name: "crashed", setup: (): void => { installPlist(); loaded("crashed"); }, text: "Bookcarrier: crashed (last exit 9) · 0 in retry queue\n", porcelain: "state=crashed\npid=-\nlast_exit=9\nqueue_items=0\n", code: 3 },
+    { name: "not-installed", setup: (): void => {}, text: "Bookcarrier: not-installed · 0 in retry queue\n", porcelain: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
+    { name: "not-loaded", setup: (): void => installPlist(), text: "Bookcarrier: not-loaded · 0 in retry queue\n", porcelain: "state=not-loaded\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
+    { name: "running", setup: (): void => { installPlist(); loaded("running"); }, text: "Bookcarrier: running (PID 30046) · 0 in retry queue\n", porcelain: "state=running\npid=30046\nlast_exit=0\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 0 },
+    { name: "stopped", setup: (): void => { installPlist(); loaded("stopped"); }, text: "Bookcarrier: stopped · 0 in retry queue\n", porcelain: "state=stopped\npid=-\nlast_exit=0\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
+    { name: "crashed", setup: (): void => { installPlist(); loaded("crashed"); }, text: "Bookcarrier: crashed (last exit 9) · 0 in retry queue\n", porcelain: "state=crashed\npid=-\nlast_exit=9\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
   ])("$name: human text, --porcelain lines and exit code (R1.1, R1.2, R1.4, R1.5)", ({ setup, text, porcelain, code }) => {
     setup();
     const before = snapshot(home);
@@ -222,60 +222,106 @@ describe("T1 — status (R1, R6.1)", () => {
       return path;
     }
 
-    it("two items → 2, read with plutil, also in the human text", () => {
+    const stageRead = (path: string, index: number): string => `-extract items.${index}.stage raw -o - ${path}`;
+
+    it("two items, one per stage → 2, 1 to download, 1 to send; one plutil call per item; also in the human text", () => {
       installPlist();
       loaded("running");
-      const path = queueAt('{"version":1,"items":[{"id":"a"},{"id":"b"}]}');
+      const path = queueAt(
+        '{"version":1,"items":[{"id":"a","stage":"download"},{"id":"b","stage":"upload"}]}',
+      );
 
       expect(run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } })).toEqual({
         code: 0,
-        stdout: "state=running\npid=30046\nlast_exit=0\nqueue_items=2\n",
+        stdout: "state=running\npid=30046\nlast_exit=0\nqueue_items=2\nqueue_download=1\nqueue_send=1\n",
         stderr: "",
       });
+      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`, stageRead(path, 0), stageRead(path, 1)]);
       expect(run(["status"], { env: { BOOKCARRIER_QUEUE_FILE: path } })).toEqual({
         code: 0,
-        stdout: "Bookcarrier: running (PID 30046) · 2 in retry queue\n",
+        stdout: "Bookcarrier: running (PID 30046) · 2 in retry queue (1 to download, 1 to send)\n",
         stderr: "",
       });
-      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`, `-extract items raw -o - ${path}`]);
     });
 
-    it("empty items [] → 0", () => {
+    it("empty items [] → 0, 0, 0 with a single plutil call", () => {
       const path = queueAt('{"version":1,"items":[]}');
 
       const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
 
-      expect(result).toEqual({ code: 3, stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\n", stderr: "" });
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n",
+        stderr: "",
+      });
       expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`]);
     });
 
-    it("missing file → 0 without calling plutil", () => {
+    it("missing file → 0, 0, 0 without calling plutil", () => {
       const path = queueAt(undefined);
 
       const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
 
-      expect(result).toEqual({ code: 3, stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\n", stderr: "" });
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n",
+        stderr: "",
+      });
       expect(lines("plutil.log")).toEqual([]);
     });
 
-    it("corrupt file → ? (and the file is left as it was)", () => {
+    it("corrupt file → ?, ?, ? (and the file is left as it was); human text unchanged", () => {
       const path = queueAt('{"version":1,');
 
       const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
 
-      expect(result).toEqual({ code: 3, stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=?\n", stderr: "" });
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=?\nqueue_download=?\nqueue_send=?\n",
+        stderr: "",
+      });
+      expect(run(["status"], { env: { BOOKCARRIER_QUEUE_FILE: path } })).toEqual({
+        code: 3,
+        stdout: "Bookcarrier: not-installed · ? in retry queue\n",
+        stderr: "",
+      });
       expect(readFileSync(path, "utf8")).toBe('{"version":1,');
+    });
+
+    it("an item with no stage (or a null or unknown one) counts in the total but in neither stage", () => {
+      const path = queueAt(
+        '{"version":1,"items":[{"id":"a","stage":"upload"},{"id":"b"},{"id":"c","stage":null},{"id":"d","stage":"other"}]}',
+      );
+
+      const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
+
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=4\nqueue_download=0\nqueue_send=1\n",
+        stderr: "",
+      });
+      expect(lines("plutil.log")).toEqual([
+        `-extract items raw -o - ${path}`,
+        stageRead(path, 0),
+        stageRead(path, 1),
+        stageRead(path, 2),
+        stageRead(path, 3),
+      ]);
     });
 
     it("defaults to ~/.bookcarrier/queue.json, like the daemon", () => {
       const path = join(home, ".bookcarrier", "queue.json");
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, '{"version":1,"items":[{"id":"a"}]}');
+      writeFileSync(path, '{"version":1,"items":[{"id":"a","stage":"download"}]}');
 
       const result = run(["status"]);
 
-      expect(result).toEqual({ code: 3, stdout: "Bookcarrier: not-installed · 1 in retry queue\n", stderr: "" });
-      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`]);
+      expect(result).toEqual({
+        code: 3,
+        stdout: "Bookcarrier: not-installed · 1 in retry queue (1 to download, 0 to send)\n",
+        stderr: "",
+      });
+      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`, stageRead(path, 0)]);
     });
   });
 

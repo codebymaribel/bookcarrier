@@ -160,7 +160,7 @@ Si lo corrés con `pnpm start`, frenalo con `Ctrl+C` y corré `pnpm start` de nu
 
 | Comando | Qué hace | Salida |
 |---|---|---|
-| `status [--porcelain]` | El estado (`running` con su PID, `stopped`, `crashed` con el último código de salida, `not-loaded`, `not-installed`) y la cantidad de pedidos en la cola de reintentos. `--porcelain` imprime líneas `state=`, `pid=`, `last_exit=` y `queue_items=` para scripts (`-` cuando no hay valor). | 0 si está corriendo, 3 si no |
+| `status [--porcelain]` | El estado (`running` con su PID, `stopped`, `crashed` con el último código de salida, `not-loaded`, `not-installed`) y la cantidad de pedidos en la cola de reintentos, separados entre los que esperan descargarse y los que esperan enviarse (`2 in retry queue (1 to download, 1 to send)`). `--porcelain` imprime líneas `state=`, `pid=`, `last_exit=`, `queue_items=`, `queue_download=` y `queue_send=` para scripts (`-` cuando no hay valor, `?` en los conteos de la cola cuando no se puede leer el archivo). | 0 si está corriendo, 3 si no |
 | `start` | Arranca el demonio (carga el job si no está cargado). Si ya está corriendo, lo dice y no hace nada. | 0 / 1 |
 | `stop` | Manda SIGTERM, así el demonio sale limpio y launchd no lo relanza hasta `bookcarrierctl start`. Espera hasta 15 s; si sigue corriendo, lo dice y sale con 1. Nunca manda SIGKILL. | 0 / 1 |
 | `restart` | Frena el demonio y lo arranca de nuevo, por ejemplo después de `pnpm build` (carga el job si no está cargado). | 0 / 1 |
@@ -202,7 +202,7 @@ El ícono tiene un símbolo distinto para cada estado, así que no depende del c
 | No instalado | libro cerrado (`book.closed`) | `Not installed` | Install |
 | `bookcarrierctl` falta o falla | signo de pregunta (`questionmark.circle`) | el error | ninguna |
 
-- La segunda línea muestra la cola de reintentos: `2 in retry queue` (o `Retry queue unreadable`).
+- La segunda línea muestra la cola de reintentos separada por etapa: `Retry queue: 1 to download · 1 to send` (siempre las dos partes, aunque una sea 0), `Retry queue: empty` cuando no tiene pedidos, o `Retry queue unreadable`.
 - Las acciones corren el comando de `bookcarrierctl` correspondiente en segundo plano (sin ventana de Terminal) y refrescan el menú enseguida.
 - Todos los menús tienen además **Open logs** (`bookcarrier.out.log` en Console), **Open spool folder** (`~/.bookcarrier/spool` en Finder) y **Open queue file**.
 - El plugin se refresca cada 10 segundos (el `10s` de su nombre). Un comando de `bookcarrierctl` que cambia el estado, corrido en la terminal, también lo refresca en el momento.
