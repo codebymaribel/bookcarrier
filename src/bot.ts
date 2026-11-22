@@ -1,9 +1,16 @@
-import { Bot, type BotConfig, type Context } from "grammy";
+import { Bot, type BotConfig, type Context, InlineKeyboard } from "grammy";
 import { extractWorkLink } from "./ao3-link.js";
 import type { ResolvedConfig } from "./config.js";
+import {
+  type ChatIO,
+  createDocumentFlow,
+  type DocumentConfig,
+  type DocumentFlow,
+  telegramDownloader,
+} from "./document-flow.js";
 import { DownloadFailedError, type DownloadResult, type downloadEpub } from "./downloader.js";
 import { classifyFailure } from "./errors.js";
-import type { Logger } from "./logger.js";
+import { logger as defaultLogger, type Logger } from "./logger.js";
 import { failureMessage, messages } from "./messages.js";
 import type { Queue } from "./queue/queue.js";
 import type { Spool } from "./queue/spool.js";
@@ -91,7 +98,8 @@ function errorText(err: unknown): string {
  * failure on a retry is removed and reported.
  *
  * All download/upload work, from requests and retries alike, runs one at a time through a single
- * promise chain: AO3 sees one request at a time and two scp never race for the Kindle.
+ * promise chain: AO3 sees one request at a time and two fic scp never race for the Kindle. Documents
+ * sent as files (document-flow.ts) do not join this chain; by default they go to a different folder.
  */
 export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipeline {
   const { logger, spool, queue } = deps;
@@ -235,16 +243,59 @@ export function notifyOwner(bot: Bot, ownerId: number): Send {
 }
 
 /**
- * Creates the grammY bot: owner filter first (R1.1), then the single text handler, which hands the
- * message to the pipeline. `grammy` is only for tests (e.g. a preset `botInfo` so no `getMe` call is made).
+ * `callback_data` of the overwrite buttons: `ow:<8-char id>:y` (Replace) or `:n` (Cancel). Only the
+ * pending id and the action, never the file name; 13 bytes, far under Telegram's 64 (R5.3). The
+ * `ow:` prefix namespaces it from future buttons.
+ */
+export const OVERWRITE_DATA = /^ow:([A-Za-z0-9_-]{8}):(y|n)$/;
+
+/** The "Replace" / "Cancel" keyboard for pending confirmation `id` (R5.1). */
+export function overwriteKeyboard(id: string): InlineKeyboard {
+  return new InlineKeyboard().text("Replace", `ow:${id}:y`).text("Cancel", `ow:${id}:n`);
+}
+
+/** The {@link ChatIO} for one update: plain-text replies in the update's chat (R9.1). */
+function chatIO(ctx: Context): ChatIO {
+  return {
+    reply: (text) => ctx.reply(text),
+    askOverwrite: (text, id) => ctx.reply(text, { reply_markup: overwriteKeyboard(id) }),
+  };
+}
+
+/**
+ * Creates the grammY bot: owner filter first (R1.1, it also drops strangers' documents and button
+ * taps), then the text handler (AO3 links → pipeline) and the document flow (feature 3): documents
+ * and overwrite button taps. A text never reaches the document flow and a document never reaches
+ * the link extraction (R2.1).
+ *
+ * `documents` defaults to the real flow, whose download uses this bot's `getFile`. `grammy` and
+ * `documents` are only for tests (e.g. a preset `botInfo` so no `getMe` call is made).
  */
 export function createBot(
-  config: Pick<ResolvedConfig, "telegramToken" | "ownerId">,
+  config: Pick<ResolvedConfig, "telegramToken" | "ownerId"> & DocumentConfig,
   pipeline: Pick<Pipeline, "handle">,
   grammy?: BotConfig<Context>,
+  documents?: DocumentFlow,
 ): Bot {
   const bot = new Bot(config.telegramToken, grammy);
+  const docs =
+    documents ??
+    createDocumentFlow(config, { download: telegramDownloader(config, (fileId) => bot.api.getFile(fileId)) });
+  const logWarn = (what: string) => (err: unknown) => {
+    defaultLogger.warn(`could not ${what}`, { error: err });
+  };
+
   bot.use(ownerOnly(config.ownerId));
   bot.on("message:text", (ctx) => pipeline.handle(ctx.message.text, (text) => ctx.reply(text)));
+  bot.on("message:document", (ctx) => docs.onDocument(ctx.message.document, chatIO(ctx)));
+  bot.callbackQuery(OVERWRITE_DATA, async (ctx) => {
+    // R5.7: stop the spinner and remove the buttons whatever happens next; failures only logged.
+    await ctx.answerCallbackQuery().catch(logWarn("answer a callback query"));
+    await ctx.editMessageReplyMarkup().catch(logWarn("remove the overwrite buttons"));
+    const [, id = "", action] = ctx.match;
+    await docs.onDecision(id, action === "y" ? "replace" : "cancel", chatIO(ctx));
+  });
+  // Any other button tap: stop the spinner and ignore it.
+  bot.on("callback_query", (ctx) => ctx.answerCallbackQuery().catch(logWarn("answer a callback query")));
   return bot;
 }

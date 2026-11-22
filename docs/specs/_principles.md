@@ -1,5 +1,7 @@
 # Bookcarrier Principles
 
+Bookcarrier is a personal daemon that carries books to the owner's Kindle through a private Telegram bot: fanfics from AO3, shared as links and downloaded as EPUB, and documents (EPUB, MOBI, PDF) sent to the bot as files.
+
 Rules that apply to every feature. Each spec references them instead of repeating them.
 
 ## Stack
@@ -29,7 +31,7 @@ Rules that apply to every feature. Each spec references them instead of repeatin
 ## Out of scope (whole project)
 
 - Searching for fics from the bot.
-- Sites other than AO3.
+- Fic sites other than AO3. (Documents sent to the bot as files do not depend on any site.)
 - Pull server (WebDAV/OPDS) — possible future fallback, not now.
 
 ## Structure of each spec

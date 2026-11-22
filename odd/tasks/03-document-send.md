@@ -26,12 +26,12 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - [x] T7 downloadTelegramFile — S6 — writer D (wave 1) — commit: acda1ce
 - [x] T8 pending store — S5 — writer C (wave 1) — commit: d8f031c
 - [x] T9 messages + documentFailureMessage — S2, S5, S7 — writer D (wave 1) — commit: acda1ce
-- [ ] T10 createDocumentFlow — S2–S7 — wave 2 — commit:
-- [ ] T11 bot.ts wiring — S1, S5 — wave 2 — commit:
-- [ ] T12 ssh in the startup binary check — S4 — wave 2 — commit:
-- [ ] T13 docs — S8, S9 — wave 2 — commit:
+- [x] T10 createDocumentFlow — S2–S7 — wave 2 — commit: 0734d43
+- [x] T11 bot.ts wiring — S1, S5 — wave 2 — commit: 0734d43
+- [x] T12 ssh in the startup binary check — S4 — wave 2 — commit: 0734d43
+- [x] T13 docs — S8, S9 — wave 2 — commit: c54700a
 - [x] Research prerequisites by hand (`ssh … test -e` exit codes; > 20 MB `getFile` error text) — owner — research.md checklist marked done (L5, L6; commit c3da530)
-- [ ] Manual verification list (tasks.md) — owner — pending human
+- [x] Manual verification list (tasks.md) — owner — all passed (L12, L13)
 
 ## Log
 
@@ -44,3 +44,7 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - L7: Wave 1 integrated: `pnpm test` 365/365, `pnpm typecheck` exit 0. Writer decisions to carry into wave 2: `ResolvedConfig.documentFolders` is a `ReadonlyMap` (defaults stored as a Map); `PendingStore.size()` is test-only; R3.4 base name = everything before the last `.`, names that sanitize to dots/spaces or dotfiles → rejected; `messages.tooBig(sizeBytes?)` takes BYTES (T10 passes `DocumentCheck.sizeBytes`), shown as binary MB; local-write errors in `downloadTelegramFile` are rethrown (→ `unexpected`); upload error classes live in `ssh.ts` and are re-exported by `uploader.ts`; key-check tests duplicated in `ssh.test.ts` instead of moved (uploader tests kept unchanged). Parent patched the `ResolvedConfig` fixtures in test/bot.flow.test.ts and test/daemon.test.ts.
 - L8: Slice boundary: wave 1 (T1–T9) = commits 14a01b4..acda1ce (~1,860 authored lines, past the ~400 slice). Delivery shape (one PR or chained PRs) is the owner's decision at publish time. Risk: item 2 (shellQuote builds a remote shell command on the Kindle; token must never leak in download errors) → independent verify launched.
 - L9: Independent verify (wave 1): no blockers; S2–S8 met. Should-fix fixed by parent: `downloadTelegramFile` rethrew any pipeline error with a `syscall` raw, so a read-side error carrying the URL/token could escape (R6.5). Now the side is decided by which stream emitted first (pipeline forwards errors to both); regression test added (RED observed, then 366/366, typecheck 0). Nit fixed: `isTooBigError` comment now cites L6.
+- L10: Wave 2 integrated: `pnpm test` 406/406, typecheck 0. Writer decisions: `download` is a required override of `createDocumentFlow` (needs `getFile`); documents are wired inside `createBot` (optional 4th param), index.ts unchanged per design; two existing binaries tests updated for `ssh`. Flagged, not fixed: a document scp after "Replace" does not join the pipeline's serialization chain, so it can run alongside a retry-queue scp; a failed overwrite question leaves the pending entry until expiry. README tables not re-run through Prettier (not installed in the repo). Slice boundary: wave 2 = 0734d43..c54700a. Independent verify of wave 2 launched (Risk: item 2 token/owner-only, item 4 concurrent scp).
+- L11: Independent verify (wave 2): no blockers; S1–S9 met (manual list pending). Concurrency (document scp alongside a retry scp) judged an acceptable follow-up: different default folders, design does not require serialization. Parent fixed the should-fix (a failed overwrite question now drops the pending entry and replies `messages.unexpected`; RED observed), corrected the bot.ts pipeline comment, and added the verifier's 6 probes as test/document.probes.test.ts. `pnpm test` 413/413, typecheck 0.
+- L12: Owner: "listas las pruebas, casi todas pasan excepto la 5 que dio este error: I couldn't download that fic right now (fanficfare exited with code 1: fanficfare.exceptions.HTTPErrorFFF: HTTP Error in FFF '429 Client Error: Too Many Requests for url: https://archiveofourown.org/works/93369896/chapters/249170766'(429)). I'll keep retrying for up to 30 minutes and tell you how it goes." Every manual item passed except acceptance criterion 12 (AO3 link while a question is pending). The 429 is AO3 rate limiting, not the document flow: the link did reach fanficfare and the feature 2 retry queue took it, so the pending question did not block the AO3 flow. Criterion 12 stays open until the retry delivers the fic (or a later fresh run does).
+- L13: Owner: "Listo el link de AO3." The retry delivered the fic: acceptance criterion 12 passed. Every manual item and T1–T13 are done; `pnpm test` 413/413, typecheck 0. Feature 3 closed; push/PR shape is the owner's decision.

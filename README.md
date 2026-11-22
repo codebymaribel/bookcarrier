@@ -2,24 +2,26 @@
 
 🇬🇧 English · [🇪🇸 Español](./README.es.md)
 
-A small personal daemon that carries books to your Kindle from your phone, through a private Telegram bot. Today it handles fanfics from [Archive of Our Own](https://archiveofourown.org) (AO3): share an AO3 link with the bot, and a few moments later the EPUB is on the Kindle, ready to read in KOReader. Next it will also take ebooks and PDFs sent to the bot as files (see [Roadmap](#roadmap)).
+A small personal daemon that carries books to your Kindle from your phone, through a private Telegram bot ready to read in KOReader.
+
+Share ebooks and PDFs (EPUB, MOBI, PDF) to the bot as files and copies them to a books folder on the Kindle, it also handles fanfics from [Archive of Our Own](https://archiveofourown.org) (AO3), share an AO3 link with the bot, and a few moments later the EPUB is on the Kindle.
+
+## Behind the scenes
 
 ```
-phone ──share link──▶ Telegram bot ──▶ Bookcarrier (on your Mac) ──FanFicFare──▶ EPUB ──scp──▶ Kindle
-                           ◀──────────── "Delivered “Title” to your Kindle." ◀──────────────┘
-```
+phone ──share link──▶ Telegram bot ──▶ Bookcarrier  ──FanFicFare──▶ EPUB ──scp──▶ Kindle
 
-> **Status:** Feature 1 (send an AO3 fic) is done and verified end to end. Feature 2 (retry queue + start at login with launchd) is done and verified on the real Kindle. Sending ebooks and PDFs as files (feature 3) is specified but not built yet.
->
-> The project was called **Ficarrier** while it only handled fanfics; it was renamed when its scope grew to books in general.
+phone ──send file──▶ Telegram bot ──▶ Bookcarrier ──getFile──▶ EPUB/MOBI/PDF ──scp──▶ Kindle
+```
 
 ## What it does today
 
-- Accepts an AO3 work link shared to the bot, even when the share menu sends the title and the URL together.
-- Downloads the fic as an EPUB with [FanFicFare](https://github.com/JimmXinu/FanFicFare), named `<work-id>-<title>.epub` so the name is stable.
+- Accepts an AO3 work link shared to the bot, even when the share menu sends the title and the URL together (Downloads the fic as an EPUB with [FanFicFare](https://github.com/JimmXinu/FanFicFare), named `<work-id>-<title>.epub` so the name is stable.).
+- Accepts a document sent to the bot as a file (EPUB, MOBI or PDF by default, up to 20 MB) and copies it to its folder on the Kindle (`/mnt/us/documents/books/` by default, not the fics' folder). If a file with that name is already there, it asks whether to replace it.
 - Copies it to the Kindle with `scp`.
 - Tells you, in the chat, whether it was delivered or exactly what failed.
-- If the failure is transient (AO3 down or rate-limiting, the Kindle's Wi-Fi asleep), it **keeps the request in a persistent queue and retries it on its own** for up to 30 minutes (see [Retry queue](#retry-queue)).
+- If the failure is transient (AO3 down or rate-limiting, the Kindle's Wi-Fi asleep), it **keeps the request in a persistent queue and retries it on its own** for up to 30 minutes (see [Retry queue](#retry-queue)). Documents are **not** retried: if the Kindle is unreachable, you send the file again.
+
 - Can run as a macOS LaunchAgent: it starts at login and comes back on its own if it crashes (see [Run as a LaunchAgent](#4-run-as-a-launchagent)).
 - Only answers **you**: messages from any other Telegram account are ignored without a reply.
 
@@ -59,22 +61,23 @@ chmod 600 ~/.bookcarrier/config.json
 
 Then edit it:
 
-| Field                  | Required | Default                    | Meaning                                                                                     |
-| ---------------------- | :------: | -------------------------- | ------------------------------------------------------------------------------------------- |
-| `telegramToken`        |    ✔     |                            | Token from @BotFather. **Never commit it.**                                                 |
-| `ownerId`              |    ✔     |                            | Your numeric Telegram ID.                                                                   |
-| `kindleUser`           |    ✔     |                            | SSH user on the Kindle (usually `root`).                                                    |
-| `kindleHost`           |    ✔     |                            | IP or hostname only, **without** the user.                                                  |
-| `sshKeyPath`           |    ✔     |                            | Path to the private key. A leading `~` is expanded.                                         |
-| `kindlePort`           |          | `2222`                     | SSH port on the Kindle (`22` if you use USBNetwork's sshd).                                 |
-| `remotePath`           |          | `/mnt/us/documents/books/` | Destination folder on the Kindle. **It must already exist**: `scp` does not create folders. |
-| `downloadTimeoutMs`    |          | `600000`                   | Maximum time for a download (10 min).                                                       |
-| `uploadTimeoutMs`      |          | `120000`                   | Maximum time for the copy (2 min).                                                          |
-| `sshConnectTimeoutSec` |          | `10`                       | SSH `ConnectTimeout`.                                                                       |
-| `queuePath`            |          | `~/.bookcarrier/queue.json` | Retry queue state file. A leading `~` is expanded.                                         |
-| `spoolDir`             |          | `~/.bookcarrier/spool`     | Where downloaded EPUBs wait for delivery. Never the system temp folder. `~` is expanded.     |
-| `giveUpAfterMs`        |          | `1800000`                  | Give up on a queued request this long after it was first enqueued (30 min).                 |
-| `retryBackoffMinutes`  |          | `[1, 2, 4, 8, 15]`         | Wait before each retry, in minutes. A non-empty list of positive integers.                  |
+| Field                  | Required | Default                                                                                                         | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------- | :------: | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `telegramToken`        |    ✔     |                                                                                                                 | Token from @BotFather. **Never commit it.**                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `ownerId`              |    ✔     |                                                                                                                 | Your numeric Telegram ID.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `kindleUser`           |    ✔     |                                                                                                                 | SSH user on the Kindle (usually `root`).                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `kindleHost`           |    ✔     |                                                                                                                 | IP or hostname only, **without** the user.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `sshKeyPath`           |    ✔     |                                                                                                                 | Path to the private key. A leading `~` is expanded.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `kindlePort`           |          | `2222`                                                                                                          | SSH port on the Kindle (`22` if you use USBNetwork's sshd).                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `remotePath`           |          | `/mnt/us/documents/books/`                                                                                      | Destination folder for the fics on the Kindle. **It must already exist**: `scp` does not create folders.                                                                                                                                                                                                                                                                                                                                                                    |
+| `documentFolders`      |          | `{ "epub": "/mnt/us/documents/books/", "mobi": "/mnt/us/documents/books/", "pdf": "/mnt/us/documents/books/" }` | Which document formats are accepted and where each one goes. Keys are lower-case extensions without the dot (`pdf`, not `PDF` or `.pdf`); values are absolute folders on the Kindle (a missing trailing `/` is added). If present, it **replaces** the default as a whole (it is not merged): leave a format out to stop accepting it. Every folder must already exist. A format KOReader cannot open (for example `azw3`) can be added, but it will not be readable there. |
+| `downloadTimeoutMs`    |          | `600000`                                                                                                        | Maximum time for a download (10 min).                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `uploadTimeoutMs`      |          | `120000`                                                                                                        | Maximum time for the copy (2 min).                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sshConnectTimeoutSec` |          | `10`                                                                                                            | SSH `ConnectTimeout`.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `queuePath`            |          | `~/.bookcarrier/queue.json`                                                                                     | Retry queue state file. A leading `~` is expanded.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `spoolDir`             |          | `~/.bookcarrier/spool`                                                                                          | Where downloaded EPUBs wait for delivery. Never the system temp folder. `~` is expanded.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `giveUpAfterMs`        |          | `1800000`                                                                                                       | Give up on a queued request this long after it was first enqueued (30 min).                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `retryBackoffMinutes`  |          | `[1, 2, 4, 8, 15]`                                                                                              | Wait before each retry, in minutes. A non-empty list of positive integers.                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 If a required field is missing or has the wrong type, the daemon does not start and the log says which field is wrong.
 
@@ -86,7 +89,7 @@ pnpm start        # node dist/index.js
 
 Run `pnpm build` again after changing the code. Stop it with `Ctrl+C` (a clean exit). Only **one** instance can poll a given bot at a time; a second one gets a Telegram `409 Conflict`.
 
-At startup the daemon checks that `fanficfare` and `scp` can be found on the `PATH`. If one is missing it logs an error naming it (and the `PATH` it searched), but it still starts.
+At startup the daemon checks that `fanficfare`, `scp` and `ssh` can be found on the `PATH`. If one is missing it logs an error naming it (and the `PATH` it searched), but it still starts.
 
 To keep it running in the background, install it as a LaunchAgent (next section) instead of using `pnpm start`.
 
@@ -127,9 +130,43 @@ A few things worth knowing:
 - Only one instance can poll the bot: stop any `pnpm start` before loading the LaunchAgent.
 - Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` and `bookcarrier.err.log` (no rotation).
 
+### 5. Restart the daemon
+
+The daemon reads `~/.bookcarrier/config.json` and loads `dist/` only at startup, so it needs a restart after any change. What to run depends on what changed:
+
+| You changed                  | Run                                          |
+| ---------------------------- | -------------------------------------------- |
+| The code (`src/`)            | `pnpm build`, then the restart command below |
+| `~/.bookcarrier/config.json` | The restart command below (no build needed)  |
+| The plist                    | `bootout`, then `bootstrap` (below)          |
+
+Restart the LaunchAgent (stops the running process and starts it again):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.codebymaribel.bookcarrier
+```
+
+After editing the plist, `kickstart` is not enough, because launchd keeps the copy it loaded. Unload it and load it again:
+
+```bash
+launchctl bootout gui/$(id -u)/com.codebymaribel.bookcarrier
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
+```
+
+Check that it came back up:
+
+```bash
+launchctl print gui/$(id -u)/com.codebymaribel.bookcarrier | grep -E 'state|pid|last exit'
+tail -n 20 ~/Library/Logs/Bookcarrier/bookcarrier.err.log
+```
+
+`state = running` with a `pid` means it is up. If it is not, the last lines of `bookcarrier.err.log` say why (for example, a config error names the field).
+
+If you run it with `pnpm start` instead, stop it with `Ctrl+C` and run `pnpm start` again.
+
 ## Using it
 
-Share (or paste) an AO3 work link to the bot. It replies right away and again when it is done.
+Share (or paste) an AO3 work link to the bot, or send it a document as a file. It replies right away and again when it is done.
 
 | You send                                                                        | The bot answers                                                                            |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -144,6 +181,23 @@ Share (or paste) an AO3 work link to the bot. It replies right away and again wh
 | A link, but the SSH key or `scp` is misconfigured                               | A configuration error naming the problem (missing key, open permissions, `scp` not found). |
 
 If a message contains several AO3 links, only the first one is used.
+
+For a document (EPUB, MOBI, PDF, as a file; the caption is ignored):
+
+| You send                                                          | The bot answers                                                                                                                           |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `Libro.epub`, not yet on the Kindle                               | `Got it, checking your Kindle…`, then `Delivered “Libro.epub” to your Kindle.`                                                            |
+| A file in a format that is not accepted (`.azw3`, `.jpg`, a GIF…) | `I can't send that kind of file. Send me one of: EPUB, MOBI, PDF.` (the list comes from `documentFolders`)                                |
+| A file bigger than 20 MB                                          | `That file is 25 MB; I can only fetch files up to 20 MB from Telegram.` Nothing is downloaded.                                            |
+| `Libro.epub`, already on the Kindle                               | `“Libro.epub” is already on your Kindle. Replace it?` with two buttons, **Replace** and **Cancel**.                                       |
+| → you tap **Replace**                                             | The file is downloaded and overwritten, then `Delivered “Libro.epub” to your Kindle.`                                                     |
+| → you tap **Cancel**                                              | `OK, I left “Libro.epub” as it was. Nothing was sent.`                                                                                    |
+| → you tap a button after 10 minutes, or after a daemon restart    | `That request is no longer pending. Send me the file again.`                                                                              |
+| A file, but the Kindle is off or asleep                           | `I couldn't send “Libro.epub” to your Kindle (…). Is it awake and on the Wi-Fi? Send me the file again when it is.` It is **not** queued. |
+| A file, but Telegram's download fails                             | `I couldn't get that file from Telegram: …`                                                                                               |
+| A file, but the SSH key or `ssh`/`scp` is misconfigured           | A configuration error naming the problem.                                                                                                 |
+
+The name on the Kindle is the file's name with the characters the Kindle's FAT32 partition rejects (`\ / : * ? " < > |`) turned into `_`: `Dune: Messiah.epub` arrives as `Dune_ Messiah.epub`. Accents are kept (`Corazón.pdf`). Extensions are matched ignoring case (`Report.PDF` is accepted).
 
 ## Retry queue
 
@@ -170,6 +224,14 @@ The window and the ladder are configurable (`giveUpAfterMs`, `retryBackoffMinute
 4. `uploadToKindle` checks the SSH key first (the same criterion SSH uses), then runs `scp`.
 5. The bot replies. On success the EPUB is deleted from the spool; on a transient failure the request goes into the retry queue; on a permanent one the error is reported and the EPUB deleted.
 
+For a document:
+
+1. `ownerOnly` also drops documents and button taps that are not from the owner.
+2. `validateDocument` accepts the file only if its extension is a key of `documentFolders` and Telegram declares it at most 20 MB, and `sanitizeFileName` builds the name it will have on the Kindle.
+3. `existsOnKindle` runs `ssh … test -e '<folder><name>'`, with the path single-quoted so the Kindle's shell never interprets any character of the name. Exit `0` means it exists, `1` that it does not; anything else means the Kindle is unreachable, and nothing is downloaded.
+4. If it exists, the bot asks with **Replace** / **Cancel** buttons and returns right away. Only the Telegram `file_id`, the name and the folder are kept, in memory, for 10 minutes.
+5. To deliver, the file is downloaded from Telegram (`getFile` + `fetch`) into a temporary folder of its own (never the spool), sent with `uploadToKindle` to its folder, and the temporary folder is deleted whatever the outcome. Documents never go into the retry queue, and the bot token never appears in a log line or a message.
+
 A few deliberate choices:
 
 - **Subprocesses use `spawn`, never `exec`**, and everything is async: nothing blocks the event loop.
@@ -185,13 +247,18 @@ src/
   daemon.ts       startup: restores the queue, reconciles the spool, arms the retry timer
   bot.ts          owner filter + the request flow (orchestration)
   errors.ts       transient vs permanent failure classification
-  binaries.ts     startup check that fanficfare and scp are on the PATH
+  binaries.ts     startup check that fanficfare, scp and ssh are on the PATH
   queue/          retry queue: state file, backoff, spool, single timer
   messages.ts     every text sent to the owner, and the error → message mapping
   ao3-link.ts     finds and validates the AO3 work link in a message
   downloader.ts   FanFicFare subprocess wrapper
-  uploader.ts     scp subprocess wrapper (+ SSH key check)
-  subprocess.ts   helpers shared by the two wrappers
+  uploader.ts     scp subprocess wrapper
+  ssh.ts          SSH options and key check shared by scp and ssh; existence check on the Kindle
+  document.ts     document validation and file name sanitization
+  document-flow.ts the document flow (orchestration), including the Replace/Cancel question
+  telegram-file.ts downloads a file sent to the bot (getFile + fetch), without leaking the token
+  pending.ts      in-memory pending Replace/Cancel questions, with a 10-minute expiry
+  subprocess.ts   helpers shared by the subprocess wrappers
   config.ts       loads and validates ~/.bookcarrier/config.json
   logger.ts       small logger (levels + timestamps)
 test/             Vitest tests, one file per module
@@ -216,14 +283,14 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 
 ## Roadmap
 
-| #   | Feature                                                 | State        |
-| --- | ------------------------------------------------------- | ------------ |
-| 1   | Send an AO3 fic from a link                             | ✅ Done      |
-| 2   | Retry queue + start at login with launchd               | ✅ Done                              |
-| 3   | Send an ebook or a PDF as a file (EPUB, MOBI, PDF)      | 📝 Specified |
-| 4   | “Follow” button and chapter tracking                    | Planned      |
-| 5   | Daily check for new chapters                            | Planned      |
-| 6   | `/list`, `/drop`, `/status` commands                    | Planned      |
+| #   | Feature                                     | State                             |
+| --- | ------------------------------------------- | --------------------------------- |
+| 1   | Send an AO3 fic from a link                 | ✅ Done                           |
+| 2   | Retry queue + start at login with launchd   | ✅ Done                           |
+| 3   | Send a document as a file (EPUB, MOBI, PDF) | ✅ Done                           |
+| 4   | “Follow” button and chapter tracking        | Planned                           |
+| 5   | Daily check for new chapters                | Planned                           |
+| 6   | `/list`, `/drop`, `/status` commands        | Planned                           |
 
 ## Known limitations
 
@@ -231,7 +298,8 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 - A request that is still on its first attempt when the daemon stops is lost; only requests already in the queue survive a restart.
 - Titles with accents lose them in the file name and in the confirmation message (`Corazón` → `Coraz_n`), because FanFicFare sanitizes file names.
 - Only individual AO3 works are supported (no series or collections).
-- Files sent to the bot (ebooks, PDFs) are not handled yet: that is feature 3. For now the bot only answers AO3 links.
+- Documents sent as files are limited to 20 MB (the Bot API's download limit) and are not retried: if the Kindle is unreachable, the file has to be sent again.
+- A document is validated by its extension only; its content is not checked.
 - The log files under `~/Library/Logs/Bookcarrier/` are not rotated.
 
 ## A note on AO3

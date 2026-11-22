@@ -3,10 +3,14 @@ import { access, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { FANFICFARE_BIN } from "./downloader.js";
 import type { Logger } from "./logger.js";
+import { SSH_BIN } from "./ssh.js";
 import { SCP_BIN } from "./uploader.js";
 
-/** External binaries the daemon spawns; both must be resolvable on the PATH (R7.7). */
-export const REQUIRED_BINARIES: readonly string[] = [FANFICFARE_BIN, SCP_BIN];
+/**
+ * External binaries the daemon spawns; all must be resolvable on the PATH (R7.7). `ssh` runs the
+ * documents' existence check (feature 3, R4.1).
+ */
+export const REQUIRED_BINARIES: readonly string[] = [FANFICFARE_BIN, SCP_BIN, SSH_BIN];
 
 /** True when `path` is a regular file the current user may execute. */
 async function isExecutableFile(path: string): Promise<boolean> {

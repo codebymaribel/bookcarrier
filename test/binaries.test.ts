@@ -39,6 +39,7 @@ describe("binary check at startup (R7.7)", () => {
 
   it("fanficfare missing → one error naming it (and the PATH)", async () => {
     await fakeBinary(dirA, "scp", true);
+    await fakeBinary(dirA, "ssh", true);
     const path = [dirA, dirB].join(delimiter);
     const { logger, entries } = recordingLogger();
 
@@ -52,8 +53,31 @@ describe("binary check at startup (R7.7)", () => {
     expect(entry?.meta).toEqual({ missing: ["fanficfare"], path });
   });
 
-  it("both present (in different PATH entries) → logs nothing", async () => {
+  it("ssh missing → the error names ssh (feature 3, T12)", async () => {
     await fakeBinary(dirA, "scp", true);
+    await fakeBinary(dirA, "fanficfare", true);
+    const { logger, entries } = recordingLogger();
+
+    await checkRequiredBinaries(logger, dirA);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.message).toContain("ssh");
+    expect(entries[0]?.meta).toEqual({ missing: ["ssh"], path: dirA });
+  });
+
+  it("all missing → one error naming fanficfare, scp and ssh together", async () => {
+    const { logger, entries } = recordingLogger();
+
+    await checkRequiredBinaries(logger, dirA);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.message).toContain("fanficfare, scp, ssh");
+    expect(entries[0]?.meta).toEqual({ missing: ["fanficfare", "scp", "ssh"], path: dirA });
+  });
+
+  it("all present (in different PATH entries) → logs nothing", async () => {
+    await fakeBinary(dirA, "scp", true);
+    await fakeBinary(dirB, "ssh", true);
     await fakeBinary(dirB, "fanficfare", true);
     const { logger, entries } = recordingLogger();
 

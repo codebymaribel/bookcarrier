@@ -2,24 +2,26 @@
 
 [🇬🇧 English](./README.md) · 🇪🇸 Español
 
-Un pequeño demonio personal que lleva libros a tu Kindle desde el celular, a través de un bot privado de Telegram. Hoy maneja fanfics de [Archive of Our Own](https://archiveofourown.org) (AO3): compartís un link de AO3 con el bot y, unos momentos después, el EPUB está en la Kindle, listo para leer en KOReader. Más adelante también va a recibir ebooks y PDFs enviados al bot como archivos (ver [Roadmap](#roadmap)).
+Un pequeño demonio personal que lleva libros a tu Kindle desde el celular, a través de un bot privado de Telegram, listos para leer en KOReader.
+
+Le mandás al bot ebooks y PDFs (EPUB, MOBI, PDF) como archivos y los copia a una carpeta de libros de la Kindle. También maneja fanfics de [Archive of Our Own](https://archiveofourown.org) (AO3): compartís un link de AO3 con el bot y, unos momentos después, el EPUB está en la Kindle.
+
+## Detrás de escena
 
 ```
-celular ──compartir link──▶ bot de Telegram ──▶ Bookcarrier (en tu Mac) ──FanFicFare──▶ EPUB ──scp──▶ Kindle
-                                 ◀──────── "Delivered “Título” to your Kindle." ◀─────────────────────┘
-```
+celular ──compartir link──▶ bot de Telegram ──▶ Bookcarrier ──FanFicFare──▶ EPUB ──scp──▶ Kindle
 
-> **Estado:** la Feature 1 (enviar un fic de AO3) está terminada y verificada de punta a punta. La Feature 2 (cola de reintentos + arranque al iniciar sesión con launchd) está terminada y verificada con la Kindle real. El envío de ebooks y PDFs como archivos (feature 3) está especificado pero todavía no construido.
->
-> El proyecto se llamaba **Ficarrier** mientras solo manejaba fanfics; cambió de nombre cuando su alcance creció a libros en general.
+celular ──enviar archivo──▶ bot de Telegram ──▶ Bookcarrier ──getFile──▶ EPUB/MOBI/PDF ──scp──▶ Kindle
+```
 
 ## Qué hace hoy
 
-- Acepta un link a un work de AO3 compartido con el bot, incluso cuando el menú de compartir manda el título y la URL juntos.
-- Descarga el fic como EPUB con [FanFicFare](https://github.com/JimmXinu/FanFicFare), con el nombre `<id-del-work>-<título>.epub`, para que el nombre sea estable.
+- Acepta un link a un work de AO3 compartido con el bot, incluso cuando el menú de compartir manda el título y la URL juntos (descarga el fic como EPUB con [FanFicFare](https://github.com/JimmXinu/FanFicFare), con el nombre `<id-del-work>-<título>.epub`, para que el nombre sea estable).
+- Acepta un documento enviado al bot como archivo (por defecto EPUB, MOBI o PDF, de hasta 20 MB) y lo copia a su carpeta en la Kindle (`/mnt/us/documents/books/` por defecto, no la carpeta de los fics). Si ya hay un archivo con ese nombre, pregunta si lo reemplaza.
 - Lo copia a la Kindle con `scp`.
 - Te avisa en el chat si se entregó o qué falló exactamente.
-- Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos (ver [Cola de reintentos](#cola-de-reintentos)).
+- Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos (ver [Cola de reintentos](#cola-de-reintentos)). Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
+
 - Puede correr como LaunchAgent de macOS: arranca al iniciar sesión y vuelve solo si se cae (ver [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent)).
 - Solo le responde a **vos**: los mensajes de cualquier otra cuenta de Telegram se ignoran sin responder.
 
@@ -69,7 +71,8 @@ Después editalo:
 | `kindleHost` | ✔ | | Solo IP o hostname, **sin** el usuario. |
 | `sshKeyPath` | ✔ | | Ruta a la llave privada. Un `~` inicial se expande. |
 | `kindlePort` | | `2222` | Puerto SSH de la Kindle (`22` si usás el sshd de USBNetwork). |
-| `remotePath` | | `/mnt/us/documents/books/` | Carpeta destino en la Kindle. **Tiene que existir ya**: `scp` no crea carpetas. |
+| `remotePath` | | `/mnt/us/documents/books/` | Carpeta destino de los fics en la Kindle. **Tiene que existir ya**: `scp` no crea carpetas. |
+| `documentFolders` | | `{ "epub": "/mnt/us/documents/books/", "mobi": "/mnt/us/documents/books/", "pdf": "/mnt/us/documents/books/" }` | Qué formatos de documento se aceptan y adónde va cada uno. Las claves son extensiones en minúscula sin el punto (`pdf`, no `PDF` ni `.pdf`); los valores, carpetas absolutas en la Kindle (si falta la `/` final, se agrega). Si está presente, **reemplaza** al default entero (no se combina con él): para dejar de aceptar un formato, sacalo. Cada carpeta tiene que existir ya. Se puede agregar un formato que KOReader no abre (por ejemplo `azw3`), pero no se va a poder leer ahí. |
 | `downloadTimeoutMs` | | `600000` | Tiempo máximo de una descarga (10 min). |
 | `uploadTimeoutMs` | | `120000` | Tiempo máximo de la copia (2 min). |
 | `sshConnectTimeoutSec` | | `10` | `ConnectTimeout` de SSH. |
@@ -88,7 +91,7 @@ pnpm start        # node dist/index.js
 
 Volvé a correr `pnpm build` después de cambiar el código. Se detiene con `Ctrl+C` (una salida limpia). Solo puede haber **una** instancia escuchando un mismo bot a la vez; una segunda recibe de Telegram un `409 Conflict`.
 
-Al arrancar, el demonio verifica que `fanficfare` y `scp` se encuentren en el `PATH`. Si falta alguno, registra un error que lo nombra (junto con el `PATH` en el que buscó), pero arranca igual.
+Al arrancar, el demonio verifica que `fanficfare`, `scp` y `ssh` se encuentren en el `PATH`. Si falta alguno, registra un error que lo nombra (junto con el `PATH` en el que buscó), pero arranca igual.
 
 Para dejarlo corriendo en segundo plano, instalalo como LaunchAgent (sección siguiente) en lugar de usar `pnpm start`.
 
@@ -129,9 +132,43 @@ Algunas cosas para tener en cuenta:
 - Solo una instancia puede escuchar el bot: detené cualquier `pnpm start` antes de cargar el LaunchAgent.
 - Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` y `bookcarrier.err.log` (sin rotación).
 
+### 5. Reiniciá el daemon
+
+El daemon lee `~/.bookcarrier/config.json` y carga `dist/` solo al arrancar, así que necesita un reinicio después de cualquier cambio. Qué correr depende de qué cambiaste:
+
+| Cambiaste | Corré |
+| --- | --- |
+| El código (`src/`) | `pnpm build` y después el comando de reinicio de abajo |
+| `~/.bookcarrier/config.json` | El comando de reinicio de abajo (no hace falta build) |
+| El plist | `bootout` y después `bootstrap` (abajo) |
+
+Reiniciar el LaunchAgent (frena el proceso que está corriendo y lo arranca de nuevo):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.codebymaribel.bookcarrier
+```
+
+Si editaste el plist, `kickstart` no alcanza, porque launchd se queda con la copia que cargó. Descargalo y cargalo de nuevo:
+
+```bash
+launchctl bootout gui/$(id -u)/com.codebymaribel.bookcarrier
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
+```
+
+Fijate que haya vuelto a arrancar:
+
+```bash
+launchctl print gui/$(id -u)/com.codebymaribel.bookcarrier | grep -E 'state|pid|last exit'
+tail -n 20 ~/Library/Logs/Bookcarrier/bookcarrier.err.log
+```
+
+`state = running` con un `pid` quiere decir que está andando. Si no, las últimas líneas de `bookcarrier.err.log` dicen por qué (por ejemplo, un error de configuración nombra el campo).
+
+Si lo corrés con `pnpm start`, frenalo con `Ctrl+C` y corré `pnpm start` de nuevo.
+
 ## Cómo se usa
 
-Compartí (o pegá) un link a un work de AO3 con el bot. Responde enseguida y otra vez cuando termina.
+Compartí (o pegá) un link a un work de AO3 con el bot, o mandale un documento como archivo. Responde enseguida y otra vez cuando termina.
 
 | Vos mandás | El bot responde |
 |---|---|
@@ -146,6 +183,23 @@ Compartí (o pegá) un link a un work de AO3 con el bot. Responde enseguida y ot
 | Un link, pero la llave SSH o `scp` están mal configurados | Un error de configuración que nombra el problema (llave ausente, permisos abiertos, `scp` no encontrado). |
 
 Si un mensaje trae varios links de AO3, solo se usa el primero.
+
+Para un documento (EPUB, MOBI, PDF, como archivo; el texto que lo acompaña se ignora):
+
+| Vos mandás | El bot responde |
+|---|---|
+| `Libro.epub`, que todavía no está en la Kindle | `Got it, checking your Kindle…` y después `Delivered “Libro.epub” to your Kindle.` |
+| Un archivo en un formato no aceptado (`.azw3`, `.jpg`, un GIF…) | `I can't send that kind of file. Send me one of: EPUB, MOBI, PDF.` (la lista sale de `documentFolders`) |
+| Un archivo de más de 20 MB | `That file is 25 MB; I can only fetch files up to 20 MB from Telegram.` No se descarga nada. |
+| `Libro.epub`, que ya está en la Kindle | `“Libro.epub” is already on your Kindle. Replace it?` con dos botones, **Replace** y **Cancel**. |
+| → tocás **Replace** | Se descarga el archivo y se sobrescribe, y después `Delivered “Libro.epub” to your Kindle.` |
+| → tocás **Cancel** | `OK, I left “Libro.epub” as it was. Nothing was sent.` |
+| → tocás un botón después de 10 minutos, o después de reiniciar el demonio | `That request is no longer pending. Send me the file again.` |
+| Un archivo, pero la Kindle está apagada o dormida | `I couldn't send “Libro.epub” to your Kindle (…). Is it awake and on the Wi-Fi? Send me the file again when it is.` **No** se encola. |
+| Un archivo, pero falla la descarga desde Telegram | `I couldn't get that file from Telegram: …` |
+| Un archivo, pero la llave SSH o `ssh`/`scp` están mal configurados | Un error de configuración que nombra el problema. |
+
+El nombre en la Kindle es el del archivo, con los caracteres que la partición FAT32 de la Kindle rechaza (`\ / : * ? " < > |`) cambiados por `_`: `Dune: Messiah.epub` llega como `Dune_ Messiah.epub`. Los acentos se conservan (`Corazón.pdf`). La extensión se compara sin importar mayúsculas (`Report.PDF` se acepta).
 
 ## Cola de reintentos
 
@@ -172,6 +226,14 @@ La ventana y la escalera de esperas se configuran (`giveUpAfterMs`, `retryBackof
 4. `uploadToKindle` revisa primero la llave SSH (con el mismo criterio que usa SSH) y después ejecuta `scp`.
 5. El bot responde. Si salió bien, el EPUB se borra del spool; ante un fallo transitorio el pedido entra en la cola de reintentos; ante uno permanente se informa el error y se borra el EPUB.
 
+Para un documento:
+
+1. `ownerOnly` también descarta los documentos y los toques de botón que no son del dueño.
+2. `validateDocument` acepta el archivo solo si su extensión es una clave de `documentFolders` y Telegram declara que pesa como mucho 20 MB, y `sanitizeFileName` arma el nombre que va a tener en la Kindle.
+3. `existsOnKindle` ejecuta `ssh … test -e '<carpeta><nombre>'`, con la ruta entre comillas simples para que el shell de la Kindle nunca interprete ningún carácter del nombre. Salida `0` significa que existe, `1` que no; cualquier otra cosa significa que la Kindle no responde, y no se descarga nada.
+4. Si existe, el bot pregunta con los botones **Replace** / **Cancel** y vuelve enseguida. Solo se guardan el `file_id` de Telegram, el nombre y la carpeta, en memoria, durante 10 minutos.
+5. Para entregarlo, el archivo se descarga de Telegram (`getFile` + `fetch`) en una carpeta temporal propia (nunca el spool), se envía con `uploadToKindle` a su carpeta y la carpeta temporal se borra pase lo que pase. Los documentos nunca entran en la cola de reintentos, y el token del bot nunca aparece en el log ni en un mensaje.
+
 Algunas decisiones deliberadas:
 
 - **Los subprocesos usan `spawn`, nunca `exec`**, y todo es asíncrono: nada bloquea el event loop.
@@ -187,13 +249,18 @@ src/
   daemon.ts       arranque: restaura la cola, reconcilia el spool, arma el timer de reintentos
   bot.ts          filtro de dueño + el flujo de cada pedido (orquestación)
   errors.ts       clasificación de fallos en transitorios y permanentes
-  binaries.ts     verificación de arranque de que fanficfare y scp estén en el PATH
+  binaries.ts     verificación de arranque de que fanficfare, scp y ssh estén en el PATH
   queue/          cola de reintentos: archivo de estado, backoff, spool, timer único
   messages.ts     todos los textos al dueño, y el mapeo error → mensaje
   ao3-link.ts     encuentra y valida el link a un work de AO3 en un mensaje
   downloader.ts   wrapper del subproceso de FanFicFare
-  uploader.ts     wrapper del subproceso de scp (+ chequeo de la llave SSH)
-  subprocess.ts   utilidades compartidas por los dos wrappers
+  uploader.ts     wrapper del subproceso de scp
+  ssh.ts          opciones SSH y chequeo de la llave compartidos por scp y ssh; chequeo de existencia en la Kindle
+  document.ts     validación de documentos y sanitización del nombre de archivo
+  document-flow.ts el flujo de documentos (orquestación), incluida la pregunta Replace/Cancel
+  telegram-file.ts descarga un archivo enviado al bot (getFile + fetch) sin filtrar el token
+  pending.ts      preguntas Replace/Cancel pendientes, en memoria, con vencimiento a los 10 minutos
+  subprocess.ts   utilidades compartidas por los wrappers de subprocesos
   config.ts       carga y valida ~/.bookcarrier/config.json
   logger.ts       logger simple (niveles + timestamps)
 test/             tests con Vitest, un archivo por módulo
@@ -222,7 +289,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | --- | ------------------------------------------------------------ | --------------- |
 | 1   | Enviar un fic de AO3 desde un link                           | ✅ Hecha        |
 | 2   | Cola de reintentos + arranque al iniciar sesión con launchd  | ✅ Hecha                             |
-| 3   | Enviar un ebook o un PDF como archivo (EPUB, MOBI, PDF)      | 📝 Especificada |
+| 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)           | ✅ Hecha |
 | 4   | Botón “Seguir” y seguimiento de capítulos                    | Planeada        |
 | 5   | Revisión diaria de capítulos nuevos                          | Planeada        |
 | 6   | Comandos `/list`, `/drop`, `/status`                         | Planeada        |
@@ -233,7 +300,8 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 - Un pedido que todavía está en su primer intento cuando el demonio se detiene se pierde; solo los pedidos que ya están en la cola sobreviven a un reinicio.
 - Los títulos con acentos los pierden en el nombre del archivo y en el mensaje de confirmación (`Corazón` → `Coraz_n`), porque FanFicFare sanitiza los nombres de archivo.
 - Solo se soportan works individuales de AO3 (no series ni colecciones).
-- Los archivos enviados al bot (ebooks, PDFs) todavía no se manejan: eso es la feature 3. Por ahora el bot solo responde a links de AO3.
+- Los documentos enviados como archivo tienen un límite de 20 MB (el límite de descarga de la Bot API) y no se reintentan: si la Kindle no responde, hay que volver a mandar el archivo.
+- Un documento se valida solo por su extensión; no se revisa su contenido.
 - Los archivos de log en `~/Library/Logs/Bookcarrier/` no se rotan.
 
 ## Una nota sobre AO3

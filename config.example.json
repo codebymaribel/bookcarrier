@@ -11,6 +11,12 @@
   "kindlePort": 2222,
   "remotePath": "/mnt/us/documents/books/",
 
+  "documentFolders": {
+    "epub": "/mnt/us/documents/books/",
+    "mobi": "/mnt/us/documents/books/",
+    "pdf": "/mnt/us/documents/books/"
+  },
+
   "queuePath": "~/.bookcarrier/queue.json",
   "spoolDir": "~/.bookcarrier/spool",
   "giveUpAfterMs": 1800000,
