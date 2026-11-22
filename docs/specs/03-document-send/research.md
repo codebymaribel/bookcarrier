@@ -39,7 +39,7 @@ Most of the pipeline already exists: `ownerOnly`, `uploadToKindle` (key check + 
 
 - A file sent "as a file" arrives as `message.document`. In grammY it is handled with `bot.on("message:document", …)`, a filter separate from the current `message:text`, so the two flows do not interfere: a document never reaches `extractWorkLink`, and a text never reaches the document flow.
 - The `Document` object always has `file_id` and `file_unique_id`. **`file_name`, `mime_type` and `file_size` are all optional** ("as defined by the sender"), so the design cannot assume a name or a size are present.
-- **Gotcha:** when a message carries an `animation` (a GIF / silent MP4), Telegram *also* sets `document` "for backward compatibility". So `message:document` also fires for GIFs. The extension check rejects them anyway (`.mp4` and `.gif` are not accepted), but it is worth having a test for it.
+- **Gotcha:** when a message carries an `animation` (a GIF / silent MP4), Telegram _also_ sets `document` "for backward compatibility". So `message:document` also fires for GIFs. The extension check rejects them anyway (`.mp4` and `.gif` are not accepted), but it is worth having a test for it.
 - A document forwarded from another chat or channel still has `from.id` = the owner (the one who forwarded it), so `ownerOnly` keeps working without changes.
 - The optional `caption` (text typed next to the file) is available but **not used** in this feature.
 
@@ -53,11 +53,11 @@ Most of the pipeline already exists: `ownerOnly`, `uploadToKindle` (key check + 
 
 ### Options for the download code
 
-| Option | How | Pros | Cons |
-|---|---|---|---|
-| **A. `ctx.getFile()` + native `fetch`** | `getFile`, build the URL, `fetch` with `AbortSignal.timeout(…)`, stream to disk with `stream/promises.pipeline` + `Readable.fromWeb` | No new dependency (principle: minimal stack). Full control over the timeout and over keeping the token out of errors. Easy to fake in tests (inject `fetch`). | About 40 lines of our own code. |
-| B. `@grammyjs/files` plugin | `bot.api.config.use(hydrateFiles(token))`, then `file.download(path)` | Less code, official grammY plugin. | New dependency for a single call. Its errors are not ours: we would have to check that none carries the URL with the token. It needs `FileFlavor` types on the context, which touches `createBot`'s types. |
-| C. Self-hosted Bot API server | `telegram-bot-api` binary running on the Mac | Files up to 2 GB. | One more process to install, keep alive and add to launchd. Discarded: 20 MB is enough. |
+| Option                                  | How                                                                                                                                  | Pros                                                                                                                                                          | Cons                                                                                                                                                                                                       |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. `ctx.getFile()` + native `fetch`** | `getFile`, build the URL, `fetch` with `AbortSignal.timeout(…)`, stream to disk with `stream/promises.pipeline` + `Readable.fromWeb` | No new dependency (principle: minimal stack). Full control over the timeout and over keeping the token out of errors. Easy to fake in tests (inject `fetch`). | About 40 lines of our own code.                                                                                                                                                                            |
+| B. `@grammyjs/files` plugin             | `bot.api.config.use(hydrateFiles(token))`, then `file.download(path)`                                                                | Less code, official grammY plugin.                                                                                                                            | New dependency for a single call. Its errors are not ours: we would have to check that none carries the URL with the token. It needs `FileFlavor` types on the context, which touches `createBot`'s types. |
+| C. Self-hosted Bot API server           | `telegram-bot-api` binary running on the Mac                                                                                         | Files up to 2 GB.                                                                                                                                             | One more process to install, keep alive and add to launchd. Discarded: 20 MB is enough.                                                                                                                    |
 
 **Proposed decision:** option **A**. It follows the project's pattern (thin wrappers we control, like `downloader.ts` and `uploader.ts`), adds no dependencies, and makes the "token never leaks" rule explicit in our own code instead of trusting a library.
 
@@ -69,12 +69,12 @@ When `document.file_size` is present and over 20 MB, the bot can reject the file
 
 The Kindle has **two readers**, and they do not support the same formats. The owner reads with KOReader, so a format KOReader can open is required.
 
-| Format | KOReader | Native Kindle reader | In scope |
-|---|---|---|---|
-| EPUB | ✔ | ✘ (only through Amazon's Send to Kindle, which converts it) | ✔ |
-| PDF | ✔ | ✔ | ✔ |
-| MOBI | ✔ | ✔ | ✔ |
-| AZW3 (KF8) | **Not listed** | ✔ | ✘ dropped |
+| Format     | KOReader       | Native Kindle reader                                        | In scope  |
+| ---------- | -------------- | ----------------------------------------------------------- | --------- |
+| EPUB       | ✔              | ✘ (only through Amazon's Send to Kindle, which converts it) | ✔         |
+| PDF        | ✔              | ✔                                                           | ✔         |
+| MOBI       | ✔              | ✔                                                           | ✔         |
+| AZW3 (KF8) | **Not listed** | ✔                                                           | ✘ dropped |
 
 - KOReader's README lists: "fixed page formats (PDF, DjVu, CBT, CBZ) and reflowable e-book formats (EPUB, FB2, Mobi, DOC, RTF, HTML, CHM, TXT)". **AZW3 is not on the list**, and r/koreader users report that it does not open. A secondary site claims the opposite; we do not trust it.
 - **Decision (2026-11-19):** AZW3 is dropped and EPUB takes its place. An AZW3 would only open in the native reader, which also does not re-index its library after an `scp` (see feature 2's research). All three formats in scope open in KOReader, which walks the filesystem and needs no refresh.
@@ -106,7 +106,7 @@ The **sanitized** name is the one used everywhere: in the existence check, in th
 
 ### Note on `scp` and odd names
 
-Since OpenSSH 9.0, `scp` uses the SFTP protocol by default, so the remote file name does not go through a shell on the Kindle. With the legacy protocol (`-O`) the remote *destination* is interpreted by the remote shell, but in our `scp` call the destination is only the destination folder (`documentFolders[ext]`) (a directory from the config), and the file name travels inside the protocol. For the upload, sanitizing the name is enough. **The existence check is different** (see below).
+Since OpenSSH 9.0, `scp` uses the SFTP protocol by default, so the remote file name does not go through a shell on the Kindle. With the legacy protocol (`-O`) the remote _destination_ is interpreted by the remote shell, but in our `scp` call the destination is only the destination folder (`documentFolders[ext]`) (a directory from the config), and the file name travels inside the protocol. For the upload, sanitizing the name is enough. **The existence check is different** (see below).
 
 ## Confirming an overwrite
 
@@ -116,16 +116,16 @@ Decision: if a file with the same (sanitized) name already exists in the destina
 
 `scp` cannot answer "does this exist?". Options:
 
-| Option | How | Pros | Cons |
-|---|---|---|---|
-| **A. `ssh` + `test -e`** | `spawn('ssh', [...same -p/-i/-o as scp..., 'user@host', 'test -e <quoted path>'])`. Exit 0 = exists, 1 = does not exist, 255 = SSH failure | One short subprocess, same key and options as the uploader, and the same `spawn` pattern. `test` is in busybox, which the Kindle has. | The remote command **does go through the Kindle's shell**: the path has to be shell-quoted (see below). |
-| B. `sftp` in batch mode | `sftp -b -` with `ls <path>` on stdin | No remote shell involved. | Its exit codes and output are harder to read; it needs `sftp-server` on the Kindle (KOReader's SSH server is dropbear, which may not ship it). |
-| C. List the folder | `ssh … ls <folder>` and look for the name in the output | One call could also serve a future `/list`. | Parsing `ls` output, with Unicode names, is fragile. |
+| Option                   | How                                                                                                                                        | Pros                                                                                                                                  | Cons                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. `ssh` + `test -e`** | `spawn('ssh', [...same -p/-i/-o as scp..., 'user@host', 'test -e <quoted path>'])`. Exit 0 = exists, 1 = does not exist, 255 = SSH failure | One short subprocess, same key and options as the uploader, and the same `spawn` pattern. `test` is in busybox, which the Kindle has. | The remote command **does go through the Kindle's shell**: the path has to be shell-quoted (see below).                                        |
+| B. `sftp` in batch mode  | `sftp -b -` with `ls <path>` on stdin                                                                                                      | No remote shell involved.                                                                                                             | Its exit codes and output are harder to read; it needs `sftp-server` on the Kindle (KOReader's SSH server is dropbear, which may not ship it). |
+| C. List the folder       | `ssh … ls <folder>` and look for the name in the output                                                                                    | One call could also serve a future `/list`.                                                                                           | Parsing `ls` output, with Unicode names, is fragile.                                                                                           |
 
 **Proposed decision:** option **A**, with three rules:
 
 - **Quoting:** wrap the full remote path in single quotes and turn every `'` in it into `'\''`. This is the standard POSIX technique and the only way to make a name like `it's.pdf` or `$(rm -rf).pdf` safe. The FAT sanitization already removes several dangerous characters, but not `'`, `$` or `` ` ``, so quoting is required anyway. It must have its own tests with hostile names.
-- **Exit codes:** with `ssh`, unlike `scp`, the exit code *does* carry meaning: 0 and 1 come from `test`, 255 from SSH itself (unreachable Kindle, auth failure). 255 is treated exactly like an upload failure: "Kindle unreachable", no retry.
+- **Exit codes:** with `ssh`, unlike `scp`, the exit code _does_ carry meaning: 0 and 1 come from `test`, 255 from SSH itself (unreachable Kindle, auth failure). 255 is treated exactly like an upload failure: "Kindle unreachable", no retry.
 - **Bonus:** the check runs **before** the download, so an asleep Kindle is detected right away, without downloading 20 MB from Telegram for nothing.
 
 The key check (`assertKeyUsable`) and the SSH options (`-p`/`-P`, `ConnectTimeout`, `BatchMode`) should be shared between `ssh` and `scp`. **Careful:** `ssh` takes the port with lowercase `-p`, while `scp` takes uppercase `-P` (the uploader already has a comment about this trap).
@@ -183,13 +183,19 @@ Feature 2 will be implemented first, so this feature builds on top of its change
 
 ## To test by hand (not internet research)
 
-- [ ] An **EPUB**, a **MOBI** and a **PDF** copied with `scp` to `/mnt/us/documents/books/`: all three open in KOReader, and they do not mix with the fics in `…/books/AO3/`.
-- [ ] `ssh … 'test -e <path>'` against the Kindle (dropbear + busybox): confirm exit 0 / 1 for a file that exists / does not exist, and 255 with the Kindle asleep.
-- [ ] A file with **accents** in its name (`Corazón.pdf`): does the name survive on the Kindle's vfat partition, and does `test -e` find it under that same name?
-- [ ] A file with **`:`** in its name, without sanitizing: confirm it fails, so the sanitization is justified with evidence.
-- [ ] A file with **`'`** in its name (`it's.pdf`): the existence check works with the quoting.
-- [ ] A **~20 MB PDF**: time the `scp` against `uploadTimeoutMs` (2 min).
-- [ ] A file **> 20 MB** sent to the bot: confirm that `file_size` comes in the update, and the exact text of `getFile`'s error.
+- [x] An **EPUB**, a **MOBI** and a **PDF** copied with `scp` to `/mnt/us/documents/books/`: all three open in KOReader, and they do not mix with the fics in `…/books/AO3/`.
+- [x] `ssh … 'test -e <path>'` against the Kindle (dropbear + busybox): confirm exit 0 / 1 for a file that exists / does not exist, and 255 with the Kindle asleep. R: `
+exists → 0
+doesnt exists → 1
+kindle asleep -> 255`
+- [x] A file with **accents** in its name (`Corazón.pdf`): does the name survive on the Kindle's vfat partition, and does `test -e` find it under that same name?
+- [x] A file with **`:`** in its name, without sanitizing: confirm it fails, so the sanitization is justified with evidence. R: error message:
+      `scp: dest open "/mnt/us/documents/books/Dune: Messiah.pdf": Bad message
+scp: failed to upload file ./Dune: Messiah.pdf to /mnt/us/documents/books/`
+- [x] A file with **`'`** in its name (`it's.pdf`): the existence check works with the quoting.
+- [x] A **~20 MB PDF**: time the `scp` against `uploadTimeoutMs` (2 min). R: tested with a 19MB file, sending duration 7ms.
+- [x] A file **> 20 MB** sent to the bot: confirm that `file_size` comes in the update, and the exact text of `getFile`'s error. R:
+      `{"ok":false,"error_code":400,"description":"Bad Request: file is too big"}%   `
 
 ## Open points
 

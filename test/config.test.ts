@@ -175,6 +175,127 @@ describe("loadConfig", () => {
   });
 });
 
+describe("documentFolders (feature 3, R8)", () => {
+  const BOOKS = "/mnt/us/documents/books/";
+
+  it("absent → epub, mobi and pdf all go to /mnt/us/documents/books/ (R8.2)", async () => {
+    const config = await loadConfig(await writeConfig(valid));
+    expect(config.documentFolders).toBeInstanceOf(Map);
+    expect([...config.documentFolders]).toEqual([
+      ["epub", BOOKS],
+      ["mobi", BOOKS],
+      ["pdf", BOOKS],
+    ]);
+    // the fics keep going to remotePath (acceptance criterion 17)
+    expect(config.remotePath).toBe(CONFIG_DEFAULTS.remotePath);
+  });
+
+  it("present → replaces the default as a whole, never merged (R8.3)", async () => {
+    const config = await loadConfig(await writeConfig({ ...valid, documentFolders: { pdf: "/x/" } }));
+    expect([...config.documentFolders]).toEqual([["pdf", "/x/"]]);
+  });
+
+  it("adds a missing trailing / (R8.5, acceptance criterion 18)", async () => {
+    const config = await loadConfig(
+      await writeConfig({
+        ...valid,
+        documentFolders: { epub: BOOKS, pdf: "/mnt/us/documents/pdfs" },
+      }),
+    );
+    expect([...config.documentFolders]).toEqual([
+      ["epub", BOOKS],
+      ["pdf", "/mnt/us/documents/pdfs/"],
+    ]);
+  });
+
+  it("the resolved value is a Map: a 'constructor' extension is never accepted", async () => {
+    const config = await loadConfig(await writeConfig(valid));
+    expect(config.documentFolders).toBeInstanceOf(Map);
+    expect(config.documentFolders.has("constructor")).toBe(false);
+    expect(config.documentFolders.has("__proto__")).toBe(false);
+  });
+
+  it("each load gets its own Map (the default is never shared)", async () => {
+    const a = await loadConfig(await writeConfig(valid));
+    const b = await loadConfig(await writeConfig(valid));
+    expect(a.documentFolders).not.toBe(b.documentFolders);
+  });
+
+  const NOT_OBJECT =
+    '"documentFolders" is optional, but if present it must be a non-empty object mapping extensions to Kindle folders';
+
+  it.each([["a string", "pdf"], ["a number", 42], ["null", null], ["an array", []], ["an empty object", {}]])(
+    "rejects documentFolders = %s (R8.4, acceptance criterion 19)",
+    async (_label, documentFolders) => {
+      const problems = await problemsOf(loadConfig(await writeConfig({ ...valid, documentFolders })));
+      expect(problems).toEqual([NOT_OBJECT]);
+    },
+  );
+
+  it.each(["PDF", ".pdf", "p df"])(
+    "rejects the key %j, naming it (R8.4, acceptance criterion 19)",
+    async (key) => {
+      const problems = await problemsOf(
+        loadConfig(await writeConfig({ ...valid, documentFolders: { epub: BOOKS, [key]: BOOKS } })),
+      );
+      expect(problems).toEqual([
+        `documentFolders: key "${key}" must be a lower-case extension without a dot (only a-z and 0-9)`,
+      ]);
+    },
+  );
+
+  it.each([[""], ["  "], [42], [null]])(
+    "rejects the value %j, naming its key (R8.4)",
+    async (value) => {
+      const problems = await problemsOf(
+        loadConfig(await writeConfig({ ...valid, documentFolders: { pdf: value } })),
+      );
+      expect(problems).toEqual(['documentFolders: the folder for "pdf" must be a non-empty string']);
+    },
+  );
+
+  it("rejects a relative folder like \"books/\", naming its key (R8.4, acceptance criterion 19)", async () => {
+    const problems = await problemsOf(
+      loadConfig(await writeConfig({ ...valid, documentFolders: { pdf: "books/" } })),
+    );
+    expect(problems).toEqual([
+      'documentFolders: the folder for "pdf" must be an absolute path (starting with "/"), got "books/"',
+    ]);
+  });
+
+  it("reports every documentFolders problem in one ConfigError, together with the other fields' problems (R8.4)", async () => {
+    const { ownerId: _omitted, ...rest } = valid;
+    const problems = await problemsOf(
+      loadConfig(
+        await writeConfig({
+          ...rest,
+          kindlePort: 0,
+          documentFolders: { PDF: BOOKS, mobi: "books/", epub: 42 },
+        }),
+      ),
+    );
+    expect(problems).toEqual([
+      'missing required field "ownerId"',
+      '"kindlePort" is optional, but if present it must be a positive integer',
+      'documentFolders: key "PDF" must be a lower-case extension without a dot (only a-z and 0-9)',
+      'documentFolders: the folder for "mobi" must be an absolute path (starting with "/"), got "books/"',
+      'documentFolders: the folder for "epub" must be a non-empty string',
+    ]);
+  });
+
+  it("existing fields keep loading exactly as before when documentFolders is present", async () => {
+    const config = await loadConfig(
+      await writeConfig({ ...valid, remotePath: "/mnt/us/documents/books/AO3/", documentFolders: { pdf: "/p" } }),
+    );
+    expect(config).toEqual({
+      ...valid,
+      ...CONFIG_DEFAULTS,
+      remotePath: "/mnt/us/documents/books/AO3/",
+      documentFolders: new Map([["pdf", "/p/"]]),
+    });
+  });
+});
+
 describe("sshKeyPath home expansion (R6.5)", () => {
   it("expands ~/ to the home directory", () => {
     expect(expandHome("~/.ssh/k", "/home/u")).toBe("/home/u/.ssh/k");
