@@ -23,8 +23,8 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - [x] T6 docs (README EN/ES: LaunchAgent install, "Restart the daemon" → ctl commands, "Control panel" section, roadmap) — S5, S7 — parent — commit: 7f9fe2b
 - [x] T7 retry queue split by stage (ctl porcelain + human status, plugin one line, README) — S1, S5 — writer — commit: 7eec48b
 - [x] T8 single log file (plist template, `logs`, Open logs, README) — S3, S4, S5 — writer — commit: d870f65
-- [ ] Manual checks by the owner (T1 `LastExitStatus` after `kill -9`; T5 `--` submenus, light/dark look) — owner — pending
-- [ ] Manual verification list (tasks.md) — owner — pending
+- [x] Manual checks by the owner (T1 `LastExitStatus` after `kill -9`; T5 `--` submenus, light/dark look) — owner — pending
+- [x] Manual verification list (tasks.md) — owner — all passed (L9–L12, L17)
 
 ## Log
 
@@ -44,3 +44,4 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - L14: T7 by a writer (7eec48b): porcelain adds `queue_download=`/`queue_send=` (per-item `plutil -extract items.N.stage`; unknown/missing stage counts only in the total); human status `· 2 in retry queue (1 to download, 1 to send)`; menu line `Retry queue: D to download · S to send` / `Retry queue: empty` / `Retry queue unreadable`; README EN/ES updated. RED 22 → GREEN; `pnpm test` 491/491, typecheck 0. The installed SwiftBar plugin is a copy: the owner must re-run `bookcarrierctl menubar install <folder>`.
 - L15: Owner: "pero si no se toca el daemon por que no podria ser incluido el log unico para este branch?" The parent's earlier question (L13) wrongly framed the single log as a daemon change; it is a launchd plist change (both StandardOutPath and StandardErrorPath → `bookcarrier.log`) applied through `bookcarrierctl install` (R3.3). L13's "Aparte" is superseded: T8 joins this branch. Spec: R3.5 added, R4.1, R4.2, R5.5 changed.
 - L16: T8 by a writer (d870f65): plist sends stdout and stderr to `bookcarrier.log`; `logs`/`logs -f` and *Open logs* use it; old .out/.err files left untouched; README EN/ES updated; design.md aligned by the parent. RED 34 → GREEN; `pnpm test` 493/493, typecheck 0. Owner must re-run `bookcarrierctl install` and `bookcarrierctl menubar install <folder>`.
+- L17: Owner: "funcionan ambos" — manual steps 5 (uninstall → Not installed with only Install, then reinstall) and 6 (`bookcarrierctl foo` → usage, exit 2) passed. Every manual item and T1–T8 done; `pnpm test` 493/493, typecheck 0. Roadmap row 4 → Done. Open: native review lineage review-14c65b234b7e8178 blocked on owner config (no model for `review-risk`), and it was started before T7/T8, so a fresh review is needed once configured. Push/PR shape is the owner's decision.

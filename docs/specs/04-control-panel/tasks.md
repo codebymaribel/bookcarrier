@@ -46,5 +46,5 @@ Prerequisite: feature 2 merged and its manual verification done (this feature co
 - [x] Menu bar *Start* → running again (acceptance 3).
 - [x] `kill -9` the daemon and open the menu right away → "Crashed", then "Running" after launchd relaunches it (acceptance 4).
 - [x] With the Kindle off, share two fics → the menu shows "2 in retry queue" (acceptance 5).
-- [ ] `bookcarrierctl uninstall` → menu shows "Not installed" with only *Install* (acceptance 6).
-- [ ] `bookcarrierctl foo` → usage, exit 2 (acceptance 7).
+- [x] `bookcarrierctl uninstall` → menu shows "Not installed" with only *Install* (acceptance 6).
+- [x] `bookcarrierctl foo` → usage, exit 2 (acceptance 7).

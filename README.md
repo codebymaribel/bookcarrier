@@ -330,7 +330,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 | 1   | Send an AO3 fic from a link                           | ✅ Done      |
 | 2   | Retry queue + start at login with launchd             | ✅ Done      |
 | 3   | Send a document as a file (EPUB, MOBI, PDF)           | ✅ Done      |
-| 4   | Control panel: `bookcarrierctl` + menu bar (SwiftBar) | 📝 Specified |
+| 4   | Control panel: `bookcarrierctl` + menu bar (SwiftBar) | ✅ Done      |
 | 5   | “Follow” button and chapter tracking                  | Planned      |
 | 6   | Daily check for new chapters                          | Planned      |
 | 7   | `/list`, `/drop`, `/status` commands                  | Planned      |

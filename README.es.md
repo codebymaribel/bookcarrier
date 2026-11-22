@@ -334,7 +334,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | 1   | Enviar un fic de AO3 desde un link                            | ✅ Hecha        |
 | 2   | Cola de reintentos + arranque al iniciar sesión con launchd   | ✅ Hecha        |
 | 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)            | ✅ Hecha        |
-| 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | 📝 Especificada |
+| 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | ✅ Hecha        |
 | 5   | Botón “Seguir” y seguimiento de capítulos                     | Planeada        |
 | 6   | Revisión diaria de capítulos nuevos                           | Planeada        |
 | 7   | Comandos `/list`, `/drop`, `/status`                          | Planeada        |
