@@ -15,5 +15,15 @@ it("the LaunchAgent template keeps the launchd contract (R7.1–R7.6)", () => {
   expect(xml).toContain("<string>/opt/homebrew/opt/node@24/bin/node</string>");
   expect(xml).toMatch(/<key>PATH<\/key><string>[^<]*\/opt\/homebrew\/bin[^<]*<\/string>/);
   expect(xml).toContain("__HOME__/Library/Logs/Bookcarrier/");
+});
+
+it("the LaunchAgent template sends stdout and stderr to one bookcarrier.log (R3.5)", () => {
+  expect(xml).toContain(
+    "<key>StandardOutPath</key><string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.log</string>",
+  );
+  expect(xml).toContain(
+    "<key>StandardErrorPath</key><string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.log</string>",
+  );
+  expect(xml).not.toMatch(/bookcarrier\.(out|err)\.log/);
   expect(xml).not.toMatch(/\/Users\//);
 });

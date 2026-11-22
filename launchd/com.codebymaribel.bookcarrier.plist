@@ -39,11 +39,13 @@
   <key>ThrottleInterval</key>
   <integer>10</integer>
 
-  <!-- R7.4: own log files; create the directory first: mkdir -p ~/Library/Logs/Bookcarrier -->
+  <!-- R7.4 + feature 4 R3.5: one own log file for stdout (INFO) and stderr (WARN/ERROR), so every
+       line reads in order in one place. The directory must exist (`bookcarrierctl install`
+       creates it; by hand: mkdir -p ~/Library/Logs/Bookcarrier). -->
   <key>StandardOutPath</key>
-  <string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.out.log</string>
+  <string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.err.log</string>
+  <string>__HOME__/Library/Logs/Bookcarrier/bookcarrier.log</string>
 
   <!-- R7.5: launchd builds no useful PATH; without Homebrew's prefix `fanficfare` is not found. -->
   <key>EnvironmentVariables</key>

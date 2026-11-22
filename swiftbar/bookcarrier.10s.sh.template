@@ -16,7 +16,7 @@ set -euo pipefail
 
 CTL="${BOOKCARRIER_CTL:-__REPO__/bin/bookcarrierctl}"   # override for tests
 OPEN="/usr/bin/open"
-LOG_FILE="$HOME/Library/Logs/Bookcarrier/bookcarrier.out.log"
+LOG_FILE="$HOME/Library/Logs/Bookcarrier/bookcarrier.log"
 SPOOL_DIR="$HOME/.bookcarrier/spool"
 QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
 
@@ -65,12 +65,16 @@ state=""
 pid="-"
 last_exit="-"
 queue_items="?"
+queue_download="?"
+queue_send="?"
 while IFS= read -r line; do
   case "$line" in
     state=*) state="${line#state=}" ;;
     pid=*) pid="${line#pid=}" ;;
     last_exit=*) last_exit="${line#last_exit=}" ;;
     queue_items=*) queue_items="${line#queue_items=}" ;;
+    queue_download=*) queue_download="${line#queue_download=}" ;;
+    queue_send=*) queue_send="${line#queue_send=}" ;;
   esac
 done <<EOF
 $output
@@ -106,10 +110,13 @@ esac
 echo "| sfimage=$icon"
 echo "---"
 echo "$title"
-if [ "$queue_items" = "?" ]; then
+# One line, split by stage (R5.2); a missing or "?" key means the queue could not be read.
+if [ "$queue_items" = "?" ] || [ "$queue_download" = "?" ] || [ "$queue_send" = "?" ]; then
   echo "Retry queue unreadable"
+elif [ "$queue_items" = "0" ]; then
+  echo "Retry queue: empty"
 else
-  echo "$queue_items in retry queue"
+  echo "Retry queue: $queue_download to download · $queue_send to send"
 fi
 echo "---"
 # Only the actions that make sense in this state (R5.3).

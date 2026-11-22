@@ -23,6 +23,7 @@ celular ──enviar archivo──▶ bot de Telegram ──▶ Bookcarrier ─�
 - Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos (ver [Cola de reintentos](#cola-de-reintentos)). Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
 
 - Puede correr como LaunchAgent de macOS: arranca al iniciar sesión y vuelve solo si se cae (ver [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent)).
+- Tiene un panel de control: `bookcarrierctl` en la terminal y un ítem en la barra de menú (SwiftBar) para arrancar, frenar y revisar el demonio (ver [Panel de control](#panel-de-control)).
 - Solo le responde a **vos**: los mensajes de cualquier otra cuenta de Telegram se ignoran sin responder.
 
 > Los mensajes del bot están en inglés. Todos viven en un solo archivo, `src/messages.ts`, por si querés traducirlos.
@@ -99,38 +100,36 @@ Para dejarlo corriendo en segundo plano, instalalo como LaunchAgent (sección si
 
 El repo trae un plist de plantilla, [`launchd/com.codebymaribel.bookcarrier.plist`](./launchd/com.codebymaribel.bookcarrier.plist). Arranca el demonio al iniciar sesión (`RunAtLoad`), lo relanza si se cae pero no después de una salida limpia (`KeepAlive: { SuccessfulExit: false }`), espera 10 s entre relanzamientos (`ThrottleInterval`) y escribe sus logs en `~/Library/Logs/Bookcarrier/`.
 
-```bash
-brew install node@24                      # ruta estable: /opt/homebrew/opt/node@24/bin/node
-pnpm build
-mkdir -p ~/Library/Logs/Bookcarrier
-cp launchd/com.codebymaribel.bookcarrier.plist ~/Library/LaunchAgents/
-```
-
-Editá `~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist` y reemplazá los valores de relleno por rutas absolutas (launchd no expande `~` ni `$HOME`):
-
-- `__REPO__` → la ruta absoluta de este repositorio (`pwd` en su raíz).
-- `__HOME__` → tu carpeta personal (`echo $HOME`).
-
-Después validalo y cargalo:
+`bin/bookcarrierctl install` lo instala por vos: copia la plantilla a `~/Library/LaunchAgents/`, completa las rutas absolutas del repo y de tu carpeta personal (launchd no expande `~` ni `$HOME`), crea la carpeta de logs, valida el plist con `plutil -lint` y lo carga. No hay que editar nada a mano.
 
 ```bash
-plutil -lint ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
-launchctl print gui/$(id -u)/com.codebymaribel.bookcarrier     # estado, PID, último código de salida
+brew install node@24          # ruta estable: /opt/homebrew/opt/node@24/bin/node
+pnpm build                    # install necesita dist/index.js
+bin/bookcarrierctl install
+bin/bookcarrierctl status     # Bookcarrier: running (PID 30046) · 0 in retry queue
 ```
 
-Para detenerlo y descargarlo (por ejemplo, antes de editar el plist):
+- Si falta Node 24 o `dist/index.js`, `install` te dice cuál y qué correr, y no escribe nada.
+- Si volvés a correr `install`, reemplaza el plist instalado por una copia nueva de la plantilla y recarga el job: así se aplican los cambios a la plantilla. Si el plist nuevo no es válido, no se cambia nada.
+- `bookcarrierctl uninstall` descarga el job y borra el plist. Conserva los logs, la cola y el spool.
+
+`bookcarrierctl` no tiene un bin de npm (tiene que andar sin Node en el `PATH`, para la barra de menú). Para correrlo desde cualquier lado, hacé un symlink en una carpeta que esté en tu `PATH`, o agregá el `bin/` del repo a tu `PATH`:
 
 ```bash
-launchctl bootout gui/$(id -u)/com.codebymaribel.bookcarrier
+ln -s "$PWD/bin/bookcarrierctl" ~/bin/bookcarrierctl    # desde la raíz del repo; ~/bin tiene que estar en tu PATH
+# o, en ~/.zshrc:
+export PATH="/ruta/absoluta/a/bookcarrier/bin:$PATH"
 ```
+
+Anda desde cualquier carpeta y a través de un symlink. En el resto de este README aparece como `bookcarrierctl`; todos sus comandos están en [Panel de control](#panel-de-control).
 
 Algunas cosas para tener en cuenta:
 
 - **No saques la entrada `EnvironmentVariables.PATH`.** launchd les da a sus procesos un `PATH` casi vacío, y los subprocesos lo heredan. Sin el prefijo de Homebrew, `fanficfare` no se encuentra y cada descarga falla como si la configuración estuviera rota. La verificación de arranque de arriba lo registra si eso pasa.
 - **La ruta de node es la de Homebrew con versión** (`/opt/homebrew/opt/node@24/bin/node`): sobrevive a las actualizaciones de parche y no salta de versión mayor. La ruta de nvm incluye la versión de parche y se rompe al actualizar.
-- Solo una instancia puede escuchar el bot: detené cualquier `pnpm start` antes de cargar el LaunchAgent.
-- Logs: `~/Library/Logs/Bookcarrier/bookcarrier.out.log` y `bookcarrier.err.log` (sin rotación).
+- **Editá la plantilla de `launchd/`, no la copia instalada**: `install` sobrescribe `~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist`.
+- Solo una instancia puede escuchar el bot: detené cualquier `pnpm start` antes de instalar el LaunchAgent.
+- Logs: un solo archivo, `~/Library/Logs/Bookcarrier/bookcarrier.log` (sin rotación), con las líneas INFO, WARN y ERROR del demonio en orden. `bookcarrierctl logs` muestra sus últimas líneas. Una instalación de antes del log único sigue escribiendo en los viejos `bookcarrier.out.log` y `bookcarrier.err.log` hasta que volvés a correr `bookcarrierctl install`; los archivos viejos no se borran.
 
 ### 5. Reiniciá el daemon
 
@@ -138,33 +137,76 @@ El daemon lee `~/.bookcarrier/config.json` y carga `dist/` solo al arrancar, as�
 
 | Cambiaste | Corré |
 | --- | --- |
-| El código (`src/`) | `pnpm build` y después el comando de reinicio de abajo |
-| `~/.bookcarrier/config.json` | El comando de reinicio de abajo (no hace falta build) |
-| El plist | `bootout` y después `bootstrap` (abajo) |
+| El código (`src/`) | `pnpm build` y después `bookcarrierctl restart` |
+| `~/.bookcarrier/config.json` | `bookcarrierctl restart` (no hace falta build) |
+| La plantilla del plist (`launchd/…plist`) | `bookcarrierctl install` |
 
-Reiniciar el LaunchAgent (frena el proceso que está corriendo y lo arranca de nuevo):
-
-```bash
-launchctl kickstart -k gui/$(id -u)/com.codebymaribel.bookcarrier
-```
-
-Si editaste el plist, `kickstart` no alcanza, porque launchd se queda con la copia que cargó. Descargalo y cargalo de nuevo:
-
-```bash
-launchctl bootout gui/$(id -u)/com.codebymaribel.bookcarrier
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codebymaribel.bookcarrier.plist
-```
+`restart` frena el proceso que está corriendo y lo arranca de nuevo. Si cambiaste la plantilla no alcanza, porque launchd se queda con la copia que cargó; `install` escribe un plist nuevo y recarga el job.
 
 Fijate que haya vuelto a arrancar:
 
 ```bash
-launchctl print gui/$(id -u)/com.codebymaribel.bookcarrier | grep -E 'state|pid|last exit'
-tail -n 20 ~/Library/Logs/Bookcarrier/bookcarrier.err.log
+bookcarrierctl status     # Bookcarrier: running (PID 30046) · 0 in retry queue
+bookcarrierctl logs       # últimas 50 líneas de bookcarrier.log
 ```
 
-`state = running` con un `pid` quiere decir que está andando. Si no, las últimas líneas de `bookcarrier.err.log` dicen por qué (por ejemplo, un error de configuración nombra el campo).
+`running` con un PID quiere decir que está andando. Si dice `crashed` o `stopped`, las últimas líneas `WARN`/`ERROR` de `bookcarrier.log` dicen por qué (por ejemplo, un error de configuración nombra el campo).
 
 Si lo corrés con `pnpm start`, frenalo con `Ctrl+C` y corré `pnpm start` de nuevo.
+
+## Panel de control
+
+`bin/bookcarrierctl` es lo único que habla con `launchctl` para Bookcarrier, y el ítem de la barra de menú solo llama a `bookcarrierctl`. Es Bash pelado y no necesita Node. En [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent) está cómo ponerlo en tu `PATH`.
+
+| Comando | Qué hace | Salida |
+|---|---|---|
+| `status [--porcelain]` | El estado (`running` con su PID, `stopped`, `crashed` con el último código de salida, `not-loaded`, `not-installed`) y la cantidad de pedidos en la cola de reintentos, separados entre los que esperan descargarse y los que esperan enviarse (`2 in retry queue (1 to download, 1 to send)`). `--porcelain` imprime líneas `state=`, `pid=`, `last_exit=`, `queue_items=`, `queue_download=` y `queue_send=` para scripts (`-` cuando no hay valor, `?` en los conteos de la cola cuando no se puede leer el archivo). | 0 si está corriendo, 3 si no |
+| `start` | Arranca el demonio (carga el job si no está cargado). Si ya está corriendo, lo dice y no hace nada. | 0 / 1 |
+| `stop` | Manda SIGTERM, así el demonio sale limpio y launchd no lo relanza hasta `bookcarrierctl start`. Espera hasta 15 s; si sigue corriendo, lo dice y sale con 1. Nunca manda SIGKILL. | 0 / 1 |
+| `restart` | Frena el demonio y lo arranca de nuevo, por ejemplo después de `pnpm build` (carga el job si no está cargado). | 0 / 1 |
+| `install` | Instala el LaunchAgent y lo carga; volvé a correrlo para aplicar cambios a la plantilla (ver [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent)). | 0 / 1 |
+| `uninstall` | Descarga el job y borra su plist. Conserva los logs, la cola y el spool. | 0 / 1 |
+| `logs [-f]` | Las últimas 50 líneas de `bookcarrier.log`. `-f` (o `--follow`) lo sigue hasta `Ctrl+C`. | la de `tail` |
+| `menubar install <carpeta>` | Instala el plugin de SwiftBar en `<carpeta>` (ver abajo). | 0 / 1 |
+| `help` | Muestra el uso. | 0 |
+
+Un comando u opción desconocidos muestran el uso y salen con 2. Si el LaunchAgent no está instalado, `start`, `stop` y `restart` salen con 1 y `Bookcarrier is not installed. Run: bookcarrierctl install`.
+
+> Los mensajes de `bookcarrierctl` y del menú están en inglés, como los del bot.
+
+**`queuePath` propio:** `bookcarrierctl` y la barra de menú leen la cola de `~/.bookcarrier/queue.json`. Si configuraste `queuePath` en `config.json`, definí también `BOOKCARRIER_QUEUE_FILE` con la misma ruta (no lee `config.json`).
+
+Por debajo usa `launchctl list`, `bootstrap`, `bootout`, `kickstart [-k]` y `kill SIGTERM` sobre `gui/$(id -u)/com.codebymaribel.bookcarrier`, así que siguen andando a mano si alguna vez los necesitás.
+
+### Barra de menú (SwiftBar)
+
+[SwiftBar](https://github.com/swiftbar/SwiftBar) muestra el estado del demonio en la barra de menú y te deja arrancarlo o frenarlo con un clic.
+
+1. `brew install swiftbar`
+2. Abrí SwiftBar y elegí una carpeta de plugins cuando te la pida (por ejemplo `~/SwiftBarPlugins`).
+3. Instalá el plugin en esa carpeta:
+
+   ```bash
+   bookcarrierctl menubar install ~/SwiftBarPlugins
+   ```
+
+   Escribe ahí `bookcarrier.10s.sh`, con la ruta de este repo completada. Volvé a correrlo si movés el repo.
+
+El ícono tiene un símbolo distinto para cada estado, así que no depende del color:
+
+| Estado | Ícono | Primera línea del menú | Acciones |
+|---|---|---|---|
+| Corriendo | libro relleno (`book.fill`) | `Running · PID 30046` | Stop, Restart |
+| Frenado o no cargado | libro con contorno (`book`) | `Stopped` | Start |
+| Caído | triángulo de advertencia (`exclamationmark.triangle.fill`) | `Crashed (last exit 9) — launchd will retry` | Start |
+| No instalado | libro cerrado (`book.closed`) | `Not installed` | Install |
+| `bookcarrierctl` falta o falla | signo de pregunta (`questionmark.circle`) | el error | ninguna |
+
+- La segunda línea muestra la cola de reintentos separada por etapa: `Retry queue: 1 to download · 1 to send` (siempre las dos partes, aunque una sea 0), `Retry queue: empty` cuando no tiene pedidos, o `Retry queue unreadable`.
+- Las acciones corren el comando de `bookcarrierctl` correspondiente en segundo plano (sin ventana de Terminal) y refrescan el menú enseguida.
+- Todos los menús tienen además **Open logs** (`bookcarrier.log` en Console), **Open spool folder** (`~/.bookcarrier/spool` en Finder) y **Open queue file**.
+- El plugin se refresca cada 10 segundos (el `10s` de su nombre). Un comando de `bookcarrierctl` que cambia el estado, corrido en la terminal, también lo refresca en el momento.
+- Para que SwiftBar arranque al iniciar sesión, usá su propia opción "Launch at login".
 
 ## Cómo se usa
 
@@ -266,6 +308,8 @@ src/
 test/             tests con Vitest, un archivo por módulo
 docs/specs/       las especificaciones (ver abajo)
 launchd/          plist de plantilla para el LaunchAgent
+bin/              bookcarrierctl, el script del panel de control
+swiftbar/         plantilla del plugin de SwiftBar para la barra de menú
 ```
 
 ## Desarrollo
@@ -290,7 +334,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | 1   | Enviar un fic de AO3 desde un link                            | ✅ Hecha        |
 | 2   | Cola de reintentos + arranque al iniciar sesión con launchd   | ✅ Hecha        |
 | 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)            | ✅ Hecha        |
-| 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | 📝 Especificada |
+| 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | ✅ Hecha        |
 | 5   | Botón “Seguir” y seguimiento de capítulos                     | Planeada        |
 | 6   | Revisión diaria de capítulos nuevos                           | Planeada        |
 | 7   | Comandos `/list`, `/drop`, `/status`                          | Planeada        |

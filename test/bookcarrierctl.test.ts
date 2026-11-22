@@ -35,7 +35,7 @@ Commands:
   restart                  Restart the daemon (e.g. after pnpm build)
   install                  Install the LaunchAgent and load it
   uninstall                Unload the LaunchAgent and delete its plist (keeps logs, queue and spool)
-  logs [-f|--follow]       Show the last lines of both logs; -f keeps following them
+  logs [-f|--follow]       Show the last lines of bookcarrier.log; -f keeps following it
   menubar install <dir>    Install the SwiftBar plugin into <dir>
   help                     Show this help
 `;
@@ -44,6 +44,15 @@ const NOT_INSTALLED = "Bookcarrier is not installed. Run: bookcarrierctl install
 
 const FAKE_LAUNCHCTL = `#!/bin/bash
 printf '%s\\n' "$*" >> "$FAKE_DIR/calls.log"
+if [ "$1" = "list" ] && [ -f "$FAKE_DIR/lingers" ]; then
+  # After bootout the real launchd keeps listing the job for a moment.
+  left="$(/bin/cat "$FAKE_DIR/lingers")"
+  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$FAKE_DIR/lingers"; /bin/cat "$FAKE_DIR/list.out"; exit 0; fi
+  /bin/rm -f "$FAKE_DIR/lingers" "$FAKE_DIR/list.out"
+fi
+if [ "$1" = "bootout" ] && [ ! -f "$FAKE_DIR/exit.bootout" ]; then
+  echo "\${LINGER:-0}" > "$FAKE_DIR/lingers"
+fi
 if [ "$1" = "list" ]; then
   if [ -f "$FAKE_DIR/list.out" ]; then /bin/cat "$FAKE_DIR/list.out"; exit 0; fi
   echo "Could not find service \\"$2\\" in domain for port" >&2
@@ -188,11 +197,11 @@ afterEach(() => {
 
 describe("T1 — status (R1, R6.1)", () => {
   it.each([
-    { name: "not-installed", setup: (): void => {}, text: "Bookcarrier: not-installed · 0 in retry queue\n", porcelain: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\n", code: 3 },
-    { name: "not-loaded", setup: (): void => installPlist(), text: "Bookcarrier: not-loaded · 0 in retry queue\n", porcelain: "state=not-loaded\npid=-\nlast_exit=-\nqueue_items=0\n", code: 3 },
-    { name: "running", setup: (): void => { installPlist(); loaded("running"); }, text: "Bookcarrier: running (PID 30046) · 0 in retry queue\n", porcelain: "state=running\npid=30046\nlast_exit=0\nqueue_items=0\n", code: 0 },
-    { name: "stopped", setup: (): void => { installPlist(); loaded("stopped"); }, text: "Bookcarrier: stopped · 0 in retry queue\n", porcelain: "state=stopped\npid=-\nlast_exit=0\nqueue_items=0\n", code: 3 },
-    { name: "crashed", setup: (): void => { installPlist(); loaded("crashed"); }, text: "Bookcarrier: crashed (last exit 9) · 0 in retry queue\n", porcelain: "state=crashed\npid=-\nlast_exit=9\nqueue_items=0\n", code: 3 },
+    { name: "not-installed", setup: (): void => {}, text: "Bookcarrier: not-installed · 0 in retry queue\n", porcelain: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
+    { name: "not-loaded", setup: (): void => installPlist(), text: "Bookcarrier: not-loaded · 0 in retry queue\n", porcelain: "state=not-loaded\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
+    { name: "running", setup: (): void => { installPlist(); loaded("running"); }, text: "Bookcarrier: running (PID 30046) · 0 in retry queue\n", porcelain: "state=running\npid=30046\nlast_exit=0\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 0 },
+    { name: "stopped", setup: (): void => { installPlist(); loaded("stopped"); }, text: "Bookcarrier: stopped · 0 in retry queue\n", porcelain: "state=stopped\npid=-\nlast_exit=0\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
+    { name: "crashed", setup: (): void => { installPlist(); loaded("crashed"); }, text: "Bookcarrier: crashed (last exit 9) · 0 in retry queue\n", porcelain: "state=crashed\npid=-\nlast_exit=9\nqueue_items=0\nqueue_download=0\nqueue_send=0\n", code: 3 },
   ])("$name: human text, --porcelain lines and exit code (R1.1, R1.2, R1.4, R1.5)", ({ setup, text, porcelain, code }) => {
     setup();
     const before = snapshot(home);
@@ -213,60 +222,106 @@ describe("T1 — status (R1, R6.1)", () => {
       return path;
     }
 
-    it("two items → 2, read with plutil, also in the human text", () => {
+    const stageRead = (path: string, index: number): string => `-extract items.${index}.stage raw -o - ${path}`;
+
+    it("two items, one per stage → 2, 1 to download, 1 to send; one plutil call per item; also in the human text", () => {
       installPlist();
       loaded("running");
-      const path = queueAt('{"version":1,"items":[{"id":"a"},{"id":"b"}]}');
+      const path = queueAt(
+        '{"version":1,"items":[{"id":"a","stage":"download"},{"id":"b","stage":"upload"}]}',
+      );
 
       expect(run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } })).toEqual({
         code: 0,
-        stdout: "state=running\npid=30046\nlast_exit=0\nqueue_items=2\n",
+        stdout: "state=running\npid=30046\nlast_exit=0\nqueue_items=2\nqueue_download=1\nqueue_send=1\n",
         stderr: "",
       });
+      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`, stageRead(path, 0), stageRead(path, 1)]);
       expect(run(["status"], { env: { BOOKCARRIER_QUEUE_FILE: path } })).toEqual({
         code: 0,
-        stdout: "Bookcarrier: running (PID 30046) · 2 in retry queue\n",
+        stdout: "Bookcarrier: running (PID 30046) · 2 in retry queue (1 to download, 1 to send)\n",
         stderr: "",
       });
-      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`, `-extract items raw -o - ${path}`]);
     });
 
-    it("empty items [] → 0", () => {
+    it("empty items [] → 0, 0, 0 with a single plutil call", () => {
       const path = queueAt('{"version":1,"items":[]}');
 
       const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
 
-      expect(result).toEqual({ code: 3, stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\n", stderr: "" });
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n",
+        stderr: "",
+      });
       expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`]);
     });
 
-    it("missing file → 0 without calling plutil", () => {
+    it("missing file → 0, 0, 0 without calling plutil", () => {
       const path = queueAt(undefined);
 
       const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
 
-      expect(result).toEqual({ code: 3, stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\n", stderr: "" });
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=0\nqueue_download=0\nqueue_send=0\n",
+        stderr: "",
+      });
       expect(lines("plutil.log")).toEqual([]);
     });
 
-    it("corrupt file → ? (and the file is left as it was)", () => {
+    it("corrupt file → ?, ?, ? (and the file is left as it was); human text unchanged", () => {
       const path = queueAt('{"version":1,');
 
       const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
 
-      expect(result).toEqual({ code: 3, stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=?\n", stderr: "" });
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=?\nqueue_download=?\nqueue_send=?\n",
+        stderr: "",
+      });
+      expect(run(["status"], { env: { BOOKCARRIER_QUEUE_FILE: path } })).toEqual({
+        code: 3,
+        stdout: "Bookcarrier: not-installed · ? in retry queue\n",
+        stderr: "",
+      });
       expect(readFileSync(path, "utf8")).toBe('{"version":1,');
+    });
+
+    it("an item with no stage (or a null or unknown one) counts in the total but in neither stage", () => {
+      const path = queueAt(
+        '{"version":1,"items":[{"id":"a","stage":"upload"},{"id":"b"},{"id":"c","stage":null},{"id":"d","stage":"other"}]}',
+      );
+
+      const result = run(["status", "--porcelain"], { env: { BOOKCARRIER_QUEUE_FILE: path } });
+
+      expect(result).toEqual({
+        code: 3,
+        stdout: "state=not-installed\npid=-\nlast_exit=-\nqueue_items=4\nqueue_download=0\nqueue_send=1\n",
+        stderr: "",
+      });
+      expect(lines("plutil.log")).toEqual([
+        `-extract items raw -o - ${path}`,
+        stageRead(path, 0),
+        stageRead(path, 1),
+        stageRead(path, 2),
+        stageRead(path, 3),
+      ]);
     });
 
     it("defaults to ~/.bookcarrier/queue.json, like the daemon", () => {
       const path = join(home, ".bookcarrier", "queue.json");
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, '{"version":1,"items":[{"id":"a"}]}');
+      writeFileSync(path, '{"version":1,"items":[{"id":"a","stage":"download"}]}');
 
       const result = run(["status"]);
 
-      expect(result).toEqual({ code: 3, stdout: "Bookcarrier: not-installed · 1 in retry queue\n", stderr: "" });
-      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`]);
+      expect(result).toEqual({
+        code: 3,
+        stdout: "Bookcarrier: not-installed · 1 in retry queue (1 to download, 0 to send)\n",
+        stderr: "",
+      });
+      expect(lines("plutil.log")).toEqual([`-extract items raw -o - ${path}`, stageRead(path, 0)]);
     });
   });
 
@@ -398,6 +453,50 @@ describe("T2 — start, stop, restart (R2)", () => {
     expect(calls()).toEqual([`list ${LABEL}`, `kickstart -k ${SERVICE}`]);
   });
 
+  it("restart on not-loaded → bootstrap the plist (nothing to kickstart)", () => {
+    installPlist();
+
+    expect(run(["restart"])).toEqual({ code: 0, stdout: "Restarted.\n", stderr: "" });
+    expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("restart when kickstart -k fails → exit 1", () => {
+    installPlist();
+    loaded("running");
+    failing("kickstart");
+
+    expect(run(["restart"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not restart Bookcarrier. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `kickstart -k ${SERVICE}`]);
+  });
+
+  it("restart on not-loaded when bootstrap fails → exit 1", () => {
+    installPlist();
+    failing("bootstrap");
+
+    expect(run(["restart"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not restart Bookcarrier. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("start on not-loaded when bootstrap fails → exit 1", () => {
+    installPlist();
+    failing("bootstrap");
+
+    expect(run(["start"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not start Bookcarrier. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
   it.each(["start", "stop", "restart"])("%s on not-installed → exit 1 pointing to install (R2.4)", (command) => {
     expect(run([command])).toEqual({ code: 1, stdout: "", stderr: NOT_INSTALLED });
     expect(calls()).toEqual([`list ${LABEL}`]);
@@ -436,10 +535,27 @@ describe("T3 — install, uninstall (R3)", () => {
     expect(written).toBe(template.replaceAll("__REPO__", repo).replaceAll("__HOME__", home));
     expect(written).not.toMatch(/__REPO__|__HOME__/);
     expect(written).toContain(`<string>${repo}/dist/index.js</string>`);
-    expect(written).toContain(`<string>${home}/Library/Logs/Bookcarrier/bookcarrier.out.log</string>`);
+    expect(written).toContain(
+      `<key>StandardOutPath</key>\n  <string>${home}/Library/Logs/Bookcarrier/bookcarrier.log</string>`,
+    );
+    expect(written).toContain(
+      `<key>StandardErrorPath</key>\n  <string>${home}/Library/Logs/Bookcarrier/bookcarrier.log</string>`,
+    );
+    expect(written).not.toMatch(/bookcarrier\.(out|err)\.log/);
     expect(statSync(logDir).isDirectory()).toBe(true);
     expect(lines("plutil.log")).toEqual([expect.stringMatching(new RegExp(`^-lint ${dirname(plist)}/\\.${LABEL}\\.\\w{6}$`))]);
     expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("install leaves the logs of an earlier install where they are (R3.5)", () => {
+    const repo = tempRepo();
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(join(logDir, "bookcarrier.out.log"), "old out\n");
+    writeFileSync(join(logDir, "bookcarrier.err.log"), "old err\n");
+    const before = snapshot(logDir);
+
+    expect(run(["install"], { script: join(repo, "bin", "bookcarrierctl"), env: nodeEnv() }).code).toBe(0);
+    expect(snapshot(logDir)).toEqual(before);
   });
 
   it("reinstall with an invalid template leaves the old plist and the running job alone (R3.3)", () => {
@@ -487,7 +603,65 @@ describe("T3 — install, uninstall (R3)", () => {
     expect(result.stderr).toBe("");
     expect(readFileSync(plist, "utf8")).not.toBe("old plist\n");
     expect(readFileSync(plist, "utf8")).not.toMatch(/__REPO__|__HOME__/);
-    expect(calls()).toEqual([`list ${LABEL}`, `bootout ${SERVICE}`, `bootstrap ${DOMAIN} ${plist}`]);
+    expect(calls()).toEqual([`list ${LABEL}`, `bootout ${SERVICE}`, `list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("reinstall waits until launchd has unloaded the old job before bootstrap (R3.3)", () => {
+    const repo = tempRepo();
+    installPlist("old plist\n");
+    loaded("running");
+
+    const result = run(["install"], {
+      script: join(repo, "bin", "bookcarrierctl"),
+      env: { ...nodeEnv(), LINGER: "2", BOOKCARRIER_STOP_POLL: "0.05" },
+    });
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: `Installed ${plist} and loaded it. Check it with: bookcarrierctl status\n`,
+      stderr: "",
+    });
+    expect(calls()).toEqual([
+      `list ${LABEL}`,
+      `bootout ${SERVICE}`,
+      `list ${LABEL}`,
+      `list ${LABEL}`,
+      `list ${LABEL}`,
+      `bootstrap ${DOMAIN} ${plist}`,
+    ]);
+  });
+
+  it("reinstall: launchd never unloads the old job → exit 1, old plist kept, no bootstrap (R3.3)", () => {
+    const repo = tempRepo();
+    installPlist("old plist\n");
+    loaded("running");
+
+    const result = run(["install"], {
+      script: join(repo, "bin", "bookcarrierctl"),
+      env: { ...nodeEnv(), LINGER: "100000", BOOKCARRIER_UNLOAD_TIMEOUT: "1", BOOKCARRIER_STOP_POLL: "0.05" },
+    });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "launchd did not unload Bookcarrier within 1 seconds. Check: bookcarrierctl status, then run install again\n",
+    });
+    expect(readFileSync(plist, "utf8")).toBe("old plist\n");
+    expect(readdirSync(dirname(plist))).toEqual([`${LABEL}.plist`]);
+    expect(calls()).not.toContain(`bootstrap ${DOMAIN} ${plist}`);
+  });
+
+  it("install: bootstrap fails → exit 1 and shows launchctl's error (R3.1)", () => {
+    const repo = tempRepo();
+    failing("bootstrap");
+
+    const result = run(["install"], { script: join(repo, "bin", "bookcarrierctl"), env: nodeEnv() });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `Installed ${plist} but could not load it (launchctl: launchctl bootstrap failed). Check: bookcarrierctl logs\n`,
+    });
   });
 
   it.each([
@@ -543,8 +717,7 @@ describe("T3 — install, uninstall (R3)", () => {
     installPlist();
     loaded("running");
     mkdirSync(logDir, { recursive: true });
-    writeFileSync(join(logDir, "bookcarrier.out.log"), "out\n");
-    writeFileSync(join(logDir, "bookcarrier.err.log"), "err\n");
+    writeFileSync(join(logDir, "bookcarrier.log"), "log\n");
     mkdirSync(join(home, ".bookcarrier", "spool"), { recursive: true });
     writeFileSync(join(home, ".bookcarrier", "queue.json"), '{"version":1,"items":[]}');
     writeFileSync(join(home, ".bookcarrier", "spool", "a.epub"), "epub");
@@ -602,31 +775,27 @@ describe("T4 — logs, usage, errors (R4, R6.3)", () => {
     });
   });
 
-  it("logs prints the last 50 lines of both files (R4.1)", () => {
+  it("logs prints the last 50 lines of bookcarrier.log only (R4.1)", () => {
     mkdirSync(logDir, { recursive: true });
-    const out = Array.from({ length: 60 }, (_, i) => `out ${i + 1}`);
-    writeFileSync(join(logDir, "bookcarrier.out.log"), `${out.join("\n")}\n`);
-    writeFileSync(join(logDir, "bookcarrier.err.log"), "err 1\nerr 2\n");
+    const log = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`);
+    writeFileSync(join(logDir, "bookcarrier.log"), `${log.join("\n")}\n`);
+    // Files from installs before R3.5 are left alone and not shown.
+    writeFileSync(join(logDir, "bookcarrier.out.log"), "old out\n");
+    writeFileSync(join(logDir, "bookcarrier.err.log"), "old err\n");
+    const before = snapshot(logDir);
 
-    expect(run(["logs"])).toEqual({
-      code: 0,
-      stdout:
-        `==> ${logDir}/bookcarrier.out.log <==\n${out.slice(10).join("\n")}\n` +
-        `\n==> ${logDir}/bookcarrier.err.log <==\nerr 1\nerr 2\n`,
-      stderr: "",
-    });
+    expect(run(["logs"])).toEqual({ code: 0, stdout: `${log.slice(10).join("\n")}\n`, stderr: "" });
     expect(calls()).toEqual([]);
+    expect(snapshot(logDir)).toEqual(before);
   });
 
-  it.each(["-f", "--follow"])("logs %s follows both files with tail -F (R4.2)", (flag) => {
+  it.each(["-f", "--follow"])("logs %s follows bookcarrier.log with tail -F (R4.2)", (flag) => {
     expect(run(["logs", flag], { env: { BOOKCARRIER_TAIL: join(fake, "tail") } })).toEqual({
       code: 0,
       stdout: "",
       stderr: "",
     });
-    expect(lines("tail.log")).toEqual([
-      `-F -n 50 ${logDir}/bookcarrier.out.log ${logDir}/bookcarrier.err.log`,
-    ]);
+    expect(lines("tail.log")).toEqual([`-F -n 50 ${logDir}/bookcarrier.log`]);
   });
 
   it.each([
@@ -664,6 +833,44 @@ describe("T5 — menubar install (R5.8)", () => {
     expect(readFileSync(target, "utf8")).toBe(`#!/bin/bash\nCTL=${repo}/bin/bookcarrierctl\necho ${repo}\n`);
     expect(statSync(target).mode & 0o111).toBe(0o111);
     expect(calls()).toEqual([]);
+  });
+
+  it("replaces an existing plugin atomically: executable, filled in, no temp files left", () => {
+    const repo = tempRepo({ plugin: template });
+    const plugins = join(root, "plugins");
+    mkdirSync(plugins, { recursive: true });
+    const target = join(plugins, "bookcarrier.10s.sh");
+    writeFileSync(target, "old plugin\n");
+    chmodSync(target, 0o644);
+
+    const result = run(["menubar", "install", plugins], { script: join(repo, "bin", "bookcarrierctl") });
+
+    expect(result).toEqual({ code: 0, stdout: `Installed the menu bar plugin: ${target}\n`, stderr: "" });
+    const content = readFileSync(target, "utf8");
+    expect(content).toBe(`#!/bin/bash\nCTL=${repo}/bin/bookcarrierctl\necho ${repo}\n`);
+    expect(content).not.toContain("__REPO__");
+    expect(statSync(target).mode & 0o777).toBe(0o755);
+    expect(readdirSync(plugins)).toEqual(["bookcarrier.10s.sh"]);
+  });
+
+  it("a failing fill step → exit 1, the previous plugin untouched and executable, no temp file", () => {
+    const repo = tempRepo({ plugin: template });
+    const plugins = join(root, "plugins");
+    mkdirSync(plugins, { recursive: true });
+    const target = join(plugins, "bookcarrier.10s.sh");
+    writeExecutable(target, "#!/bin/bash\necho old\n");
+    chmodSync(join(repo, "swiftbar", "bookcarrier.10s.sh.template"), 0o000);
+
+    const result = run(["menubar", "install", plugins], { script: join(repo, "bin", "bookcarrierctl") });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not write the menu bar plugin; the existing plugin was kept.\n",
+    });
+    expect(readFileSync(target, "utf8")).toBe("#!/bin/bash\necho old\n");
+    expect(statSync(target).mode & 0o777).toBe(0o755);
+    expect(readdirSync(plugins)).toEqual(["bookcarrier.10s.sh"]);
   });
 
   it("a missing folder → exit 1, nothing written", () => {

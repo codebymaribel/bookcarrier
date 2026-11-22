@@ -41,12 +41,14 @@ PLIST_TEMPLATE="$REPO/launchd/$LABEL.plist"
 PLUGIN_TEMPLATE="$REPO/swiftbar/bookcarrier.10s.sh.template"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/Bookcarrier"
-OUT_LOG="$LOG_DIR/bookcarrier.out.log"
-ERR_LOG="$LOG_DIR/bookcarrier.err.log"
+# One file for the daemon's stdout and stderr (R3.5). Logs of earlier installs
+# (bookcarrier.out.log / bookcarrier.err.log) are left where they are.
+LOG_FILE="$LOG_DIR/bookcarrier.log"
 NODE="${BOOKCARRIER_NODE:-/opt/homebrew/opt/node@24/bin/node}"
 QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
 STOP_TIMEOUT="${BOOKCARRIER_STOP_TIMEOUT:-15}"
 STOP_POLL="${BOOKCARRIER_STOP_POLL:-0.5}"
+UNLOAD_TIMEOUT="${BOOKCARRIER_UNLOAD_TIMEOUT:-10}"
 
 NOT_INSTALLED="Bookcarrier is not installed. Run: bookcarrierctl install"
 
@@ -63,7 +65,7 @@ Commands:
   restart                  Restart the daemon (e.g. after pnpm build)
   install                  Install the LaunchAgent and load it
   uninstall                Unload the LaunchAgent and delete its plist (keeps logs, queue and spool)
-  logs [-f|--follow]       Show the last lines of both logs; -f keeps following them
+  logs [-f|--follow]       Show the last lines of bookcarrier.log; -f keeps following it
   menubar install <dir>    Install the SwiftBar plugin into <dir>
   help                     Show this help
 EOF
@@ -127,10 +129,33 @@ queue_items() {
   fi
 }
 
+# queue_stages <items> → "<download> <send>": one plutil call per item reads its stage (R1.3, R5.6).
+# "upload" counts as send; an unreadable, null or unknown stage counts in neither. When the
+# total is not a plain count ("?" or anything else), both are "?".
+queue_stages() {
+  local items="$1" i=0 download=0 send=0 stage
+  case "$items" in
+    '' | *[!0-9]*)
+      echo "? ?"
+      return 0
+      ;;
+  esac
+  while [ "$i" -lt "$items" ]; do
+    if stage="$("$PLUTIL" -extract "items.$i.stage" raw -o - "$QUEUE_FILE" 2>/dev/null)"; then
+      case "$stage" in
+        download) download=$((download + 1)) ;;
+        upload) send=$((send + 1)) ;;
+      esac
+    fi
+    i=$((i + 1))
+  done
+  echo "$download $send"
+}
+
 # --- Commands -----------------------------------------------------------------------------
 
 cmd_status() {
-  local porcelain=0 state pid last_exit items
+  local porcelain=0 state pid last_exit items download send breakdown=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --porcelain) porcelain=1 ;;
@@ -142,13 +167,20 @@ cmd_status() {
 $(job_state)
 EOF
   items="$(queue_items)"
+  read -r download send <<EOF
+$(queue_stages "$items")
+EOF
   if [ "$porcelain" = "1" ]; then
-    printf 'state=%s\npid=%s\nlast_exit=%s\nqueue_items=%s\n' "$state" "$pid" "$last_exit" "$items"
+    printf 'state=%s\npid=%s\nlast_exit=%s\nqueue_items=%s\nqueue_download=%s\nqueue_send=%s\n' \
+      "$state" "$pid" "$last_exit" "$items" "$download" "$send"
   else
+    if [ "$download" != "?" ] && [ "$items" -gt 0 ]; then
+      breakdown=" ($download to download, $send to send)"
+    fi
     case "$state" in
-      running) printf 'Bookcarrier: running (PID %s) · %s in retry queue\n' "$pid" "$items" ;;
-      crashed) printf 'Bookcarrier: crashed (last exit %s) · %s in retry queue\n' "$last_exit" "$items" ;;
-      *) printf 'Bookcarrier: %s · %s in retry queue\n' "$state" "$items" ;;
+      running) printf 'Bookcarrier: running (PID %s) · %s in retry queue%s\n' "$pid" "$items" "$breakdown" ;;
+      crashed) printf 'Bookcarrier: crashed (last exit %s) · %s in retry queue%s\n' "$last_exit" "$items" "$breakdown" ;;
+      *) printf 'Bookcarrier: %s · %s in retry queue%s\n' "$state" "$items" "$breakdown" ;;
     esac
   fi
   if [ "$state" = "running" ]; then return 0; fi
@@ -242,7 +274,7 @@ EOF
 }
 
 cmd_install() {
-  local missing=0 state pid last_exit lint_out tmp_plist
+  local missing=0 state pid last_exit lint_out tmp_plist deadline bootstrap_out
   # R3.2: refuse before touching anything.
   if [ ! -x "$NODE" ]; then
     echo "Cannot install: Node 24 not found at $NODE. Run: brew install node@24" >&2
@@ -277,6 +309,15 @@ EOF
     *)
       "$LAUNCHCTL" bootout "$SERVICE" >/dev/null 2>&1 ||
         fail "Could not unload the running Bookcarrier; nothing was changed."
+      # bootout returns before launchd has let go of the job; a bootstrap issued too early
+      # fails ("5: Input/output error"), so wait until `launchctl list` no longer knows it.
+      deadline=$((SECONDS + UNLOAD_TIMEOUT))
+      while "$LAUNCHCTL" list "$LABEL" >/dev/null 2>&1; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+          fail "launchd did not unload Bookcarrier within $UNLOAD_TIMEOUT seconds. Check: bookcarrierctl status, then run install again"
+        fi
+        "$SLEEP" "$STOP_POLL"
+      done
       ;;
   esac
 
@@ -284,8 +325,9 @@ EOF
   "$MV" -f "$tmp_plist" "$PLIST"
   trap - EXIT
   "$MKDIR" -p "$LOG_DIR"
-  "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 ||
-    fail "Installed $PLIST but could not load it. Check: bookcarrierctl logs"
+  if ! bootstrap_out="$("$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" 2>&1)"; then
+    fail "Installed $PLIST but could not load it (launchctl: ${bootstrap_out%%$'\n'*}). Check: bookcarrierctl logs"
+  fi
   refresh_swiftbar
   echo "Installed $PLIST and loaded it. Check it with: bookcarrierctl status"
 }
@@ -322,13 +364,13 @@ cmd_logs() {
     shift
   done
   if [ "$follow" = "1" ]; then
-    exec "$TAIL" -F -n 50 "$OUT_LOG" "$ERR_LOG"
+    exec "$TAIL" -F -n 50 "$LOG_FILE"
   fi
-  exec "$TAIL" -n 50 "$OUT_LOG" "$ERR_LOG"
+  exec "$TAIL" -n 50 "$LOG_FILE"
 }
 
 cmd_menubar() {
-  local dir target
+  local dir target tmp_plugin
   if [ "${1:-}" != "install" ]; then usage_error "Unknown command: menubar${1:+ $1}"; fi
   shift
   if [ $# -eq 0 ]; then usage_error "Missing the SwiftBar plugin folder."; fi
@@ -338,8 +380,16 @@ cmd_menubar() {
   [ -d "$dir" ] || fail "Plugin folder not found: $dir"
   [ -f "$PLUGIN_TEMPLATE" ] || fail "Plugin template not found: $PLUGIN_TEMPLATE"
   target="${dir%/}/bookcarrier.10s.sh"
-  "$SED" -e "s|__REPO__|$(sed_escape "$REPO")|g" "$PLUGIN_TEMPLATE" >"$target"
-  "$CHMOD" +x "$target"
+  # SwiftBar runs the plugin every 10 s: build it in a temp file next to it and rename it into
+  # place, so a refresh never sees a partial or non-executable script and a failure keeps the old one.
+  tmp_plugin="$("$MKTEMP" "${dir%/}/.bookcarrier.XXXXXX")" ||
+    fail "Could not write to the plugin folder: $dir"
+  trap '"$RM" -f "$tmp_plugin"' EXIT
+  { "$SED" -e "s|__REPO__|$(sed_escape "$REPO")|g" "$PLUGIN_TEMPLATE" >"$tmp_plugin" 2>/dev/null &&
+    "$CHMOD" 755 "$tmp_plugin" &&
+    "$MV" -f "$tmp_plugin" "$target"; } ||
+    fail "Could not write the menu bar plugin; the existing plugin was kept."
+  trap - EXIT
   echo "Installed the menu bar plugin: $target"
 }
 
