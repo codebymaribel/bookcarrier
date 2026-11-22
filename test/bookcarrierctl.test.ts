@@ -453,6 +453,50 @@ describe("T2 — start, stop, restart (R2)", () => {
     expect(calls()).toEqual([`list ${LABEL}`, `kickstart -k ${SERVICE}`]);
   });
 
+  it("restart on not-loaded → bootstrap the plist (nothing to kickstart)", () => {
+    installPlist();
+
+    expect(run(["restart"])).toEqual({ code: 0, stdout: "Restarted.\n", stderr: "" });
+    expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("restart when kickstart -k fails → exit 1", () => {
+    installPlist();
+    loaded("running");
+    failing("kickstart");
+
+    expect(run(["restart"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not restart Bookcarrier. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `kickstart -k ${SERVICE}`]);
+  });
+
+  it("restart on not-loaded when bootstrap fails → exit 1", () => {
+    installPlist();
+    failing("bootstrap");
+
+    expect(run(["restart"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not restart Bookcarrier. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("start on not-loaded when bootstrap fails → exit 1", () => {
+    installPlist();
+    failing("bootstrap");
+
+    expect(run(["start"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not start Bookcarrier. Check: bookcarrierctl logs\n",
+    });
+    expect(calls()).toEqual([`list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
   it.each(["start", "stop", "restart"])("%s on not-installed → exit 1 pointing to install (R2.4)", (command) => {
     expect(run([command])).toEqual({ code: 1, stdout: "", stderr: NOT_INSTALLED });
     expect(calls()).toEqual([`list ${LABEL}`]);
@@ -789,6 +833,44 @@ describe("T5 — menubar install (R5.8)", () => {
     expect(readFileSync(target, "utf8")).toBe(`#!/bin/bash\nCTL=${repo}/bin/bookcarrierctl\necho ${repo}\n`);
     expect(statSync(target).mode & 0o111).toBe(0o111);
     expect(calls()).toEqual([]);
+  });
+
+  it("replaces an existing plugin atomically: executable, filled in, no temp files left", () => {
+    const repo = tempRepo({ plugin: template });
+    const plugins = join(root, "plugins");
+    mkdirSync(plugins, { recursive: true });
+    const target = join(plugins, "bookcarrier.10s.sh");
+    writeFileSync(target, "old plugin\n");
+    chmodSync(target, 0o644);
+
+    const result = run(["menubar", "install", plugins], { script: join(repo, "bin", "bookcarrierctl") });
+
+    expect(result).toEqual({ code: 0, stdout: `Installed the menu bar plugin: ${target}\n`, stderr: "" });
+    const content = readFileSync(target, "utf8");
+    expect(content).toBe(`#!/bin/bash\nCTL=${repo}/bin/bookcarrierctl\necho ${repo}\n`);
+    expect(content).not.toContain("__REPO__");
+    expect(statSync(target).mode & 0o777).toBe(0o755);
+    expect(readdirSync(plugins)).toEqual(["bookcarrier.10s.sh"]);
+  });
+
+  it("a failing fill step → exit 1, the previous plugin untouched and executable, no temp file", () => {
+    const repo = tempRepo({ plugin: template });
+    const plugins = join(root, "plugins");
+    mkdirSync(plugins, { recursive: true });
+    const target = join(plugins, "bookcarrier.10s.sh");
+    writeExecutable(target, "#!/bin/bash\necho old\n");
+    chmodSync(join(repo, "swiftbar", "bookcarrier.10s.sh.template"), 0o000);
+
+    const result = run(["menubar", "install", plugins], { script: join(repo, "bin", "bookcarrierctl") });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "Could not write the menu bar plugin; the existing plugin was kept.\n",
+    });
+    expect(readFileSync(target, "utf8")).toBe("#!/bin/bash\necho old\n");
+    expect(statSync(target).mode & 0o777).toBe(0o755);
+    expect(readdirSync(plugins)).toEqual(["bookcarrier.10s.sh"]);
   });
 
   it("a missing folder → exit 1, nothing written", () => {

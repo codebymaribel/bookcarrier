@@ -370,7 +370,7 @@ cmd_logs() {
 }
 
 cmd_menubar() {
-  local dir target
+  local dir target tmp_plugin
   if [ "${1:-}" != "install" ]; then usage_error "Unknown command: menubar${1:+ $1}"; fi
   shift
   if [ $# -eq 0 ]; then usage_error "Missing the SwiftBar plugin folder."; fi
@@ -380,8 +380,16 @@ cmd_menubar() {
   [ -d "$dir" ] || fail "Plugin folder not found: $dir"
   [ -f "$PLUGIN_TEMPLATE" ] || fail "Plugin template not found: $PLUGIN_TEMPLATE"
   target="${dir%/}/bookcarrier.10s.sh"
-  "$SED" -e "s|__REPO__|$(sed_escape "$REPO")|g" "$PLUGIN_TEMPLATE" >"$target"
-  "$CHMOD" +x "$target"
+  # SwiftBar runs the plugin every 10 s: build it in a temp file next to it and rename it into
+  # place, so a refresh never sees a partial or non-executable script and a failure keeps the old one.
+  tmp_plugin="$("$MKTEMP" "${dir%/}/.bookcarrier.XXXXXX")" ||
+    fail "Could not write to the plugin folder: $dir"
+  trap '"$RM" -f "$tmp_plugin"' EXIT
+  { "$SED" -e "s|__REPO__|$(sed_escape "$REPO")|g" "$PLUGIN_TEMPLATE" >"$tmp_plugin" 2>/dev/null &&
+    "$CHMOD" 755 "$tmp_plugin" &&
+    "$MV" -f "$tmp_plugin" "$target"; } ||
+    fail "Could not write the menu bar plugin; the existing plugin was kept."
+  trap - EXIT
   echo "Installed the menu bar plugin: $target"
 }
 
