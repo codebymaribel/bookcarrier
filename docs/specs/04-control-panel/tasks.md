@@ -37,7 +37,7 @@ Prerequisite: feature 2 merged and its manual verification done (this feature co
   - Test: `menubar install <dir>` writes `bookcarrier.10s.sh`, executable, with no `__REPO__` left (R5.8).
   - Manual: confirm the `--` submenu syntax and the look in light and dark mode (research.md).
 
-- [ ] **T6 — Docs.** README (English and Spanish): replace the hand-editing steps of the LaunchAgent section with `bookcarrierctl install`; add a "Control panel" section with the commands table and the SwiftBar setup (`brew install swiftbar`, choose a plugin folder, `bookcarrierctl menubar install <folder>`). Roadmap row for feature 7.
+- [ ] **T6 — Docs.** README (English and Spanish): replace the hand-editing steps of the LaunchAgent section with `bookcarrierctl install`; replace the commands of the "Restart the daemon" section (added by feature 3) with `bookcarrierctl restart` / `start` / `stop` / `status`, keeping the "what changed → what to run" table; add a "Control panel" section with the commands table and the SwiftBar setup (`brew install swiftbar`, choose a plugin folder, `bookcarrierctl menubar install <folder>`). Roadmap row for feature 4.
 
 ## Manual verification (before closing the feature)
 
