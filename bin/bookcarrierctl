@@ -47,6 +47,7 @@ NODE="${BOOKCARRIER_NODE:-/opt/homebrew/opt/node@24/bin/node}"
 QUEUE_FILE="${BOOKCARRIER_QUEUE_FILE:-$HOME/.bookcarrier/queue.json}"
 STOP_TIMEOUT="${BOOKCARRIER_STOP_TIMEOUT:-15}"
 STOP_POLL="${BOOKCARRIER_STOP_POLL:-0.5}"
+UNLOAD_TIMEOUT="${BOOKCARRIER_UNLOAD_TIMEOUT:-10}"
 
 NOT_INSTALLED="Bookcarrier is not installed. Run: bookcarrierctl install"
 
@@ -242,7 +243,7 @@ EOF
 }
 
 cmd_install() {
-  local missing=0 state pid last_exit lint_out tmp_plist
+  local missing=0 state pid last_exit lint_out tmp_plist deadline bootstrap_out
   # R3.2: refuse before touching anything.
   if [ ! -x "$NODE" ]; then
     echo "Cannot install: Node 24 not found at $NODE. Run: brew install node@24" >&2
@@ -277,6 +278,15 @@ EOF
     *)
       "$LAUNCHCTL" bootout "$SERVICE" >/dev/null 2>&1 ||
         fail "Could not unload the running Bookcarrier; nothing was changed."
+      # bootout returns before launchd has let go of the job; a bootstrap issued too early
+      # fails ("5: Input/output error"), so wait until `launchctl list` no longer knows it.
+      deadline=$((SECONDS + UNLOAD_TIMEOUT))
+      while "$LAUNCHCTL" list "$LABEL" >/dev/null 2>&1; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+          fail "launchd did not unload Bookcarrier within $UNLOAD_TIMEOUT seconds. Check: bookcarrierctl status, then run install again"
+        fi
+        "$SLEEP" "$STOP_POLL"
+      done
       ;;
   esac
 
@@ -284,8 +294,9 @@ EOF
   "$MV" -f "$tmp_plist" "$PLIST"
   trap - EXIT
   "$MKDIR" -p "$LOG_DIR"
-  "$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 ||
-    fail "Installed $PLIST but could not load it. Check: bookcarrierctl logs"
+  if ! bootstrap_out="$("$LAUNCHCTL" bootstrap "$DOMAIN" "$PLIST" 2>&1)"; then
+    fail "Installed $PLIST but could not load it (launchctl: ${bootstrap_out%%$'\n'*}). Check: bookcarrierctl logs"
+  fi
   refresh_swiftbar
   echo "Installed $PLIST and loaded it. Check it with: bookcarrierctl status"
 }

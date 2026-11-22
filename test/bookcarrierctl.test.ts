@@ -44,6 +44,15 @@ const NOT_INSTALLED = "Bookcarrier is not installed. Run: bookcarrierctl install
 
 const FAKE_LAUNCHCTL = `#!/bin/bash
 printf '%s\\n' "$*" >> "$FAKE_DIR/calls.log"
+if [ "$1" = "list" ] && [ -f "$FAKE_DIR/lingers" ]; then
+  # After bootout the real launchd keeps listing the job for a moment.
+  left="$(/bin/cat "$FAKE_DIR/lingers")"
+  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$FAKE_DIR/lingers"; /bin/cat "$FAKE_DIR/list.out"; exit 0; fi
+  /bin/rm -f "$FAKE_DIR/lingers" "$FAKE_DIR/list.out"
+fi
+if [ "$1" = "bootout" ] && [ ! -f "$FAKE_DIR/exit.bootout" ]; then
+  echo "\${LINGER:-0}" > "$FAKE_DIR/lingers"
+fi
 if [ "$1" = "list" ]; then
   if [ -f "$FAKE_DIR/list.out" ]; then /bin/cat "$FAKE_DIR/list.out"; exit 0; fi
   echo "Could not find service \\"$2\\" in domain for port" >&2
@@ -487,7 +496,65 @@ describe("T3 — install, uninstall (R3)", () => {
     expect(result.stderr).toBe("");
     expect(readFileSync(plist, "utf8")).not.toBe("old plist\n");
     expect(readFileSync(plist, "utf8")).not.toMatch(/__REPO__|__HOME__/);
-    expect(calls()).toEqual([`list ${LABEL}`, `bootout ${SERVICE}`, `bootstrap ${DOMAIN} ${plist}`]);
+    expect(calls()).toEqual([`list ${LABEL}`, `bootout ${SERVICE}`, `list ${LABEL}`, `bootstrap ${DOMAIN} ${plist}`]);
+  });
+
+  it("reinstall waits until launchd has unloaded the old job before bootstrap (R3.3)", () => {
+    const repo = tempRepo();
+    installPlist("old plist\n");
+    loaded("running");
+
+    const result = run(["install"], {
+      script: join(repo, "bin", "bookcarrierctl"),
+      env: { ...nodeEnv(), LINGER: "2", BOOKCARRIER_STOP_POLL: "0.05" },
+    });
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: `Installed ${plist} and loaded it. Check it with: bookcarrierctl status\n`,
+      stderr: "",
+    });
+    expect(calls()).toEqual([
+      `list ${LABEL}`,
+      `bootout ${SERVICE}`,
+      `list ${LABEL}`,
+      `list ${LABEL}`,
+      `list ${LABEL}`,
+      `bootstrap ${DOMAIN} ${plist}`,
+    ]);
+  });
+
+  it("reinstall: launchd never unloads the old job → exit 1, old plist kept, no bootstrap (R3.3)", () => {
+    const repo = tempRepo();
+    installPlist("old plist\n");
+    loaded("running");
+
+    const result = run(["install"], {
+      script: join(repo, "bin", "bookcarrierctl"),
+      env: { ...nodeEnv(), LINGER: "100000", BOOKCARRIER_UNLOAD_TIMEOUT: "1", BOOKCARRIER_STOP_POLL: "0.05" },
+    });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "launchd did not unload Bookcarrier within 1 seconds. Check: bookcarrierctl status, then run install again\n",
+    });
+    expect(readFileSync(plist, "utf8")).toBe("old plist\n");
+    expect(readdirSync(dirname(plist))).toEqual([`${LABEL}.plist`]);
+    expect(calls()).not.toContain(`bootstrap ${DOMAIN} ${plist}`);
+  });
+
+  it("install: bootstrap fails → exit 1 and shows launchctl's error (R3.1)", () => {
+    const repo = tempRepo();
+    failing("bootstrap");
+
+    const result = run(["install"], { script: join(repo, "bin", "bookcarrierctl"), env: nodeEnv() });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `Installed ${plist} but could not load it (launchctl: launchctl bootstrap failed). Check: bookcarrierctl logs\n`,
+    });
   });
 
   it.each([
