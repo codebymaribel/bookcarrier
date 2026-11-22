@@ -67,7 +67,7 @@ job_state → prints: "<state> <pid|-> <last_exit|->"
 | `restart` | `kickstart -k` (R2.3) | 0 / 1 |
 | `install` | Preconditions (R3.2) → if loaded, `bootout` → copy `launchd/…plist`, `sed` `__REPO__`/`__HOME__` → `mkdir -p $LOG_DIR` → `plutil -lint` → `bootstrap` (R3.1, R3.3) | 0 / 1 |
 | `uninstall` | `bootout` if loaded → `rm $PLIST`. Logs, queue and spool are kept (R3.4) | 0 / 1 |
-| `logs [-f]` | `tail -n 50` of both logs; `-f` → `tail -F` (R4) | tail's |
+| `logs [-f]` | `tail -n 50 bookcarrier.log`; `-f` → `tail -F` (R4) | tail's |
 | `menubar install <dir>` | Copy the plugin template to `<dir>/bookcarrier.10s.sh` with `__REPO__` filled in, then `chmod +x` (R5.8) | 0 / 1 |
 | `help`, unknown | Usage on stderr (R6.3) | 0 / 2 |
 
@@ -101,7 +101,7 @@ Menu below the first line, with actions filtered by state (R5.3):
 Stop | bash=__REPO__/bin/bookcarrierctl param0=stop terminal=false refresh=true
 Restart | bash=… param0=restart terminal=false refresh=true
 ---
-Open logs | bash=/usr/bin/open param0=-a param1=Console param2=<out.log> terminal=false
+Open logs | bash=/usr/bin/open param0=-a param1=Console param2=<bookcarrier.log> terminal=false
 Open spool folder | href=file://<spool>
 Open queue file | bash=/usr/bin/open param0=<queue.json> terminal=false
 ```
