@@ -36,11 +36,12 @@ Starting, stopping and checking the daemon today means typing `launchctl` comman
 - R3.2: Before installing, the system shall check that `/opt/homebrew/opt/node@24/bin/node` and `dist/index.js` exist, and refuse with a message naming what is missing (`brew install node@24` / `pnpm build`).
 - R3.3: When a plist is already installed, `install` shall replace it and reload the job, so it is also the way to apply template changes.
 - R3.4: When the owner runs `bookcarrierctl uninstall`, the system shall unload the job and delete the plist. It shall **not** delete the logs, the queue or the spool.
+- R3.5: The LaunchAgent template shall send the daemon's stdout and stderr to one file, `~/Library/Logs/Bookcarrier/bookcarrier.log`, so INFO, WARN and ERROR lines read in order in a single place. The daemon itself is not changed (it still writes INFO to stdout and WARN/ERROR to stderr). Earlier `bookcarrier.out.log` / `bookcarrier.err.log` files are left as they are. (Added 2026-11-22, owner request L12/L15.)
 
 ### R4 — Logs
 
-- R4.1: When the owner runs `bookcarrierctl logs`, the system shall show the last lines of both log files.
-- R4.2: With `-f`/`--follow`, it shall keep following both files until Ctrl+C.
+- R4.1: When the owner runs `bookcarrierctl logs`, the system shall show the last lines of `bookcarrier.log`.
+- R4.2: With `-f`/`--follow`, it shall keep following that file until Ctrl+C.
 
 ### R5 — Menu bar (SwiftBar plugin)
 
@@ -48,7 +49,7 @@ Starting, stopping and checking the daemon today means typing `launchctl` comman
 - R5.2: The menu shall show the state in words, the PID when running, and the retry queue in one line split by stage: `Retry queue: 1 to download · 1 to send` (`Retry queue: empty` when it has no items). (Changed 2026-11-22, owner request L12.)
 - R5.3: The menu shall offer only the actions that make sense in the current state: *Start* when not running, *Stop* and *Restart* when running, *Install* when not installed.
 - R5.4: Clicking an action shall run the matching `bookcarrierctl` command in the background (no Terminal window) and refresh the plugin right after.
-- R5.5: The menu shall offer *Open logs* (opens the log in Console.app), *Open spool folder* and *Open queue file* (in Finder / the default editor).
+- R5.5: The menu shall offer *Open logs* (opens `bookcarrier.log` in Console.app), *Open spool folder* and *Open queue file* (in Finder / the default editor).
 - R5.6: The plugin shall refresh on its own every 10 seconds, and shall cost nothing measurable while idle: one `launchctl list` call and one `plutil` call per refresh plus one per queued item (to read its stage), no polling inside the daemon.
 - R5.7: When `bookcarrierctl` is not found or fails, the plugin shall show a warning icon and the error in the menu instead of an empty or frozen menu bar item.
 - R5.8: `bookcarrierctl menubar install <plugins-folder>` shall install the plugin into SwiftBar's plugin folder with the repo's absolute path filled in.
