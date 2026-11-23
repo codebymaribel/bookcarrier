@@ -126,9 +126,11 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
     });
   };
 
-  const download = async (id: string, url: string): Promise<DownloadResult> => {
+  const download = async (id: string, url: string, workId: string): Promise<DownloadResult> => {
     const dir = await spool.prepare(id);
-    return deps.download(url, dir, { timeoutMs: config.downloadTimeoutMs });
+    const result = await deps.download(url, dir, { timeoutMs: config.downloadTimeoutMs, workId });
+    if (result.metaWarning !== undefined) logger.warn(result.metaWarning, { workId, id });
+    return result;
   };
 
   const handle = async (text: string, reply: Send): Promise<void> => {
@@ -167,7 +169,7 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
     await exclusive(async () => {
       let result: DownloadResult | undefined;
       try {
-        result = await download(id, link.canonicalUrl);
+        result = await download(id, link.canonicalUrl, link.workId);
         await deps.upload(result.filePath, uploadOptions);
         logger.info("delivered", { workId: link.workId, title: result.title });
         await say(messages.delivered(result.title));
@@ -181,7 +183,11 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
               id,
               url: link.canonicalUrl,
               stage: result === undefined ? "download" : "upload",
-              ...(result !== undefined && { epubPath: result.filePath, title: result.title }),
+              ...(result !== undefined && {
+                epubPath: result.filePath,
+                title: result.title,
+                ...(result.meta !== undefined && { meta: result.meta }),
+              }),
               error: errorText(err),
             });
             logger.info("enqueued", { workId: link.workId, id });
@@ -215,8 +221,9 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
         throw new RateLimitStillOn(lastRateLimit.error);
       }
       if (current.stage === "download") {
-        const result = await download(current.id, current.url);
-        current = await queue.promoteToUpload(current.id, result.filePath, result.title);
+        const workId = extractWorkLink(current.url);
+        const result = await download(current.id, current.url, workId.ok ? workId.workId : "unknown");
+        current = await queue.promoteToUpload(current.id, result.filePath, result.title, result.meta);
       }
       if (current.epubPath === undefined) throw new Error(`queue item ${current.id} has no EPUB`);
       await deps.upload(current.epubPath, uploadOptions);

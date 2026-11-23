@@ -21,6 +21,8 @@ export type Config = {
   // retry queue (feature 2)
   /** Queue state file. `~` is expanded. */
   queuePath?: string;
+  /** Follow state file (feature 5, R7.1). `~` is expanded. */
+  followsPath?: string;
   /** Directory where downloaded EPUBs wait for delivery; never the system temp dir. */
   spoolDir?: string;
   /** Give up on a queued request this long after it was first enqueued. */
@@ -58,6 +60,7 @@ export const CONFIG_DEFAULTS = {
   kindlePort: 2222,
   remotePath: "/mnt/us/documents/books/",
   queuePath: join(homedir(), ".bookcarrier", "queue.json"),
+  followsPath: join(homedir(), ".bookcarrier", "follows.json"),
   spoolDir: join(homedir(), ".bookcarrier", "spool"),
   giveUpAfterMs: 1_800_000,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
@@ -80,6 +83,7 @@ type OptionalKey =
   | "kindlePort"
   | "remotePath"
   | "queuePath"
+  | "followsPath"
   | "spoolDir"
   | "giveUpAfterMs"
   | "retryBackoffMinutes"
@@ -266,6 +270,7 @@ export function parseConfig(raw: unknown): ResolvedConfig {
   }
 
   const queuePath = optionalString(raw, "queuePath", CONFIG_DEFAULTS.queuePath, problems);
+  const followsPath = optionalString(raw, "followsPath", CONFIG_DEFAULTS.followsPath, problems);
   const spoolDir = optionalString(raw, "spoolDir", CONFIG_DEFAULTS.spoolDir, problems);
   const giveUpAfterMs = optionalPositiveInt(
     raw,
@@ -302,6 +307,7 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     kindlePort,
     remotePath,
     queuePath: expandHome(queuePath),
+    followsPath: expandHome(followsPath),
     spoolDir: expandHome(spoolDir),
     giveUpAfterMs,
     retryBackoffMinutes,

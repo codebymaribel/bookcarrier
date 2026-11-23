@@ -25,7 +25,7 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: a write that fails leaves the previous file intact (atomic write).
   - Test: **every existing `src/retry-queue/state.test.ts` test passes unchanged** (regression guard for the extraction).
 
-- [ ] **T3 — `src/follows/follows.ts` (new context `src/follows/`, with `index.ts`): state, `onDelivered`, `follow`, `unfollow`** (test `src/follows/follows.test.ts`). Uses T1 and T2, with a store in a temp directory.
+- [x] **T3 — `src/follows/follows.ts` (new context `src/follows/`, with `index.ts`): state, `onDelivered`, `follow`, `unfollow`** (test `src/follows/follows.test.ts`). Uses T1 and T2, with a store in a temp directory.
   - Test, one per row of design.md's `onDelivered` table: no meta → `none` and nothing written; followed + `completed` → `completed` and removed (R6.4); followed + in-progress or unknown → `updated` with the new chapters, status, title and `updatedAt` (R6.1); not followed + in-progress → `offer` and added to `recent` (R3.1); not followed + completed or unknown → `none` (R3.1a).
   - Test: `recent` keeps the 10 most recent work ids; the 11th drops the oldest; re-delivering a fic that is already in `recent` moves it to the front without duplicating it (R3.5).
   - Test: a followed fic is never dropped by the 10-entry limit (R3.5).
@@ -34,11 +34,11 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: when `store.write` rejects, the call rejects and the in-memory state is unchanged.
   - Test: two calls started together (`onDelivered` and `follow` without awaiting the first) are applied in order, and the file holds both effects (serialized writes).
 
-- [ ] **T4 — `src/shared/config.ts`: `followsPath`** (test `src/shared/config.test.ts`).
+- [x] **T4 — `src/shared/config.ts`: `followsPath`** (test `src/shared/config.test.ts`).
   - Test: absent → `~/.bookcarrier/follows.json` expanded (R7.1); `~/x.json` → expanded; empty string or a non-string → `ConfigError` naming `followsPath`, together with other fields' problems (R7.2).
   - Test: the existing config tests pass unchanged.
 
-- [ ] **T5 — `src/fanfic/downloader.ts`: `--json-meta-file` and `meta`** (test `src/fanfic/downloader.test.ts`). `spawn` mocked, as today.
+- [x] **T5 — `src/fanfic/downloader.ts`: `--json-meta-file` and `meta`** (test `src/fanfic/downloader.test.ts`). `spawn` mocked, as today.
   - `downloadEpub` receives the parsed link (work id and canonical URL); `DownloadResult` gains `meta?: FicMeta`.
   - Test: the arguments are exactly the current ones plus `--json-meta-file`.
   - Test: the fake run writes the EPUB and a valid `<epub>.json` → `meta` is set (R2.1).
@@ -46,7 +46,7 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: the `.json` file does not count as an extra EPUB (one `.epub` + one `.json` → success).
   - Test: every existing downloader error test passes unchanged.
 
-- [ ] **T6 — `src/retry-queue/`: keep `meta` on the item** (tests in `queue.test.ts` and `state.test.ts`).
+- [x] **T6 — `src/retry-queue/`: keep `meta` on the item** (tests in `queue.test.ts` and `state.test.ts`).
   - `QueueItem.meta?: FicMeta`; `promoteToUpload` stores it.
   - Test: an item promoted with `meta` survives a write and a read with the same `meta` (R2.5).
   - Test: a queue file written before this feature (items without `meta`) loads, with `meta` undefined and no corrupt backup (R2.6).

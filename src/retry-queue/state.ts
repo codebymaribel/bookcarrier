@@ -1,3 +1,4 @@
+import type { FicMeta } from "../fanfic/index.js";
 import { createJsonFileStore, type JsonFileStore, type JsonReadResult } from "../shared/index.js";
 
 export type Stage = "download" | "upload";
@@ -14,6 +15,11 @@ export type QueueItem = {
   epubPath?: string;
   /** Known once the download succeeded; used in the delivery and give-up messages. */
   title?: string;
+  /**
+   * Chapter metadata from the download (feature 5, R2.5), kept so a delivery made by a retry can
+   * still offer Follow. Independent of `deferred`. Absent in files written before the feature (R2.6).
+   */
+  meta?: FicMeta;
   /** Failed retries so far (the failure that enqueued it is not counted). */
   attempts: number;
   /** Epoch ms of the first enqueue: the basis of the give-up window, never reset. */
@@ -51,6 +57,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isOptionalString = (v: unknown): boolean => v === undefined || typeof v === "string";
 
+const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v !== "";
+
+function isFicMeta(value: unknown): value is FicMeta {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value["workId"]) &&
+    isNonEmptyString(value["url"]) &&
+    typeof value["title"] === "string" &&
+    typeof value["author"] === "string" &&
+    typeof value["chapters"] === "number" &&
+    Number.isSafeInteger(value["chapters"]) &&
+    value["chapters"] > 0 &&
+    (value["status"] === "in-progress" || value["status"] === "completed" || value["status"] === "unknown")
+  );
+}
+
+/** Drops a `meta` that is not a valid {@link FicMeta}; the item itself is kept (R2.5, R2.6). */
+function withValidMeta(item: QueueItem): QueueItem {
+  const { meta, ...rest } = item;
+  return meta !== undefined && isFicMeta(meta) ? item : rest;
+}
+
 function isQueueItem(value: unknown): value is QueueItem {
   return (
     isRecord(value) &&
@@ -71,7 +99,7 @@ function isQueueItem(value: unknown): value is QueueItem {
 function parseState(raw: unknown): QueueState | undefined {
   if (!isRecord(raw) || raw["version"] !== 1 || !Array.isArray(raw["items"])) return undefined;
   if (!raw["items"].every(isQueueItem)) return undefined;
-  return { version: 1, items: raw["items"] };
+  return { version: 1, items: raw["items"].map(withValidMeta) };
 }
 
 /**

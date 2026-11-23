@@ -37,7 +37,8 @@ afterEach(async () => {
   await rm(outDir, { recursive: true, force: true });
 });
 
-const start = (timeoutMs = 60_000) => downloadEpub(URL_, outDir, { timeoutMs });
+const WORK_ID = "65164981";
+const start = (timeoutMs = 60_000) => downloadEpub(URL_, outDir, { timeoutMs, workId: WORK_ID });
 
 /** Rejection reason of a promise, so a test can inspect the error object. */
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -64,6 +65,7 @@ describe("downloadEpub — how FanFicFare is launched", () => {
       "--non-interactive",
       "-o",
       "output_filename=${storyId}-${title}${formatext}",
+      "--json-meta-file",
     ]);
   });
 
@@ -86,7 +88,7 @@ describe("downloadEpub — success and result lookup (R3.2, R3.3)", () => {
     await writeFile(join(outDir, EPUB), "epub-bytes");
     const promise = start();
     child.emit("close", 0, null);
-    expect(await promise).toEqual({
+    expect(await promise).toMatchObject({
       filePath: join(outDir, EPUB),
       title: "Title_ Fooled Around (And Fell in Love)",
     });
@@ -128,6 +130,52 @@ describe("downloadEpub — success and result lookup (R3.2, R3.3)", () => {
     const promise = start();
     child.emit("close", 0, null);
     expect(await rejection(promise)).toMatchObject({ reason: "multiple-files" });
+  });
+});
+
+describe("downloadEpub — chapter metadata (feature 5, R2.1, R2.3)", () => {
+  const meta = (numChapters: unknown) =>
+    JSON.stringify({ title: "Real Title", author: "Someone", numChapters, status: "In-Progress" });
+
+  it("a valid <epub>.json → meta is set (R2.1)", async () => {
+    await writeFile(join(outDir, EPUB), "x");
+    await writeFile(join(outDir, `${EPUB}.json`), meta("1,204"));
+    const promise = start();
+    child.emit("close", 0, null);
+    const result = await promise;
+    expect(result.meta).toEqual({
+      workId: WORK_ID,
+      url: URL_,
+      title: "Real Title",
+      author: "Someone",
+      chapters: 1204,
+      status: "in-progress",
+    });
+    expect(result.metaWarning).toBeUndefined();
+  });
+
+  it("one .epub + one .json is not 'multiple files'", async () => {
+    await writeFile(join(outDir, EPUB), "x");
+    await writeFile(join(outDir, `${EPUB}.json`), meta(3));
+    const promise = start();
+    child.emit("close", 0, null);
+    expect((await promise).filePath).toBe(join(outDir, EPUB));
+  });
+
+  it.each([
+    ["no .json file", undefined],
+    ["invalid JSON", "{ nope"],
+    ["invalid numChapters", meta("abc")],
+  ])("%s → still resolves, meta undefined, a warning names the work id (R2.3)", async (_name, body) => {
+    await writeFile(join(outDir, EPUB), "x");
+    if (body !== undefined) await writeFile(join(outDir, `${EPUB}.json`), body);
+    const promise = start();
+    child.emit("close", 0, null);
+    const result = await promise;
+    expect(result.filePath).toBe(join(outDir, EPUB));
+    expect(result.title).toBe("Title_ Fooled Around (And Fell in Love)");
+    expect(result.meta).toBeUndefined();
+    expect(result.metaWarning).toContain(WORK_ID);
   });
 });
 

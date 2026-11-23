@@ -6,6 +6,7 @@ import {
   DEFAULT_GIVE_UP_AFTER_MS,
   shouldGiveUp,
 } from "./queue.js";
+import type { FicMeta } from "../fanfic/index.js";
 import type { QueueItem, QueueState, StateStore } from "./state.js";
 
 const MIN = 60_000;
@@ -124,6 +125,51 @@ describe("promoteToUpload (R3.2)", () => {
       firstQueuedAt: 0,
     });
     expect(writes.at(-1)?.items).toEqual([promoted]);
+  });
+});
+
+describe("meta (feature 5, R2.5)", () => {
+  const meta: FicMeta = {
+    workId: "1",
+    url: "https://archiveofourown.org/works/1",
+    title: "Title",
+    author: "A",
+    chapters: 3,
+    status: "in-progress",
+  };
+
+  it("promoteToUpload stores the download's meta and persists it", async () => {
+    const { queue, writes } = setup();
+    await queue.enqueue({ url: "u", stage: "download", error: "429" });
+    const promoted = await queue.promoteToUpload("id-1", "/spool/id-1/x.epub", "Title", meta);
+    expect(promoted.meta).toEqual(meta);
+    expect(writes.at(-1)?.items[0]?.meta).toEqual(meta);
+  });
+
+  it("promoteToUpload without meta leaves the item without it", async () => {
+    const { queue } = setup();
+    await queue.enqueue({ url: "u", stage: "download", error: "429" });
+    expect((await queue.promoteToUpload("id-1", "/p", "T")).meta).toBeUndefined();
+  });
+
+  it("promoteToUpload on a deferred item sets meta and keeps deferred (#7)", async () => {
+    const { queue } = setup();
+    await queue.enqueue({ url: "u", stage: "download", error: "429", deferredUntil: 7 * HOUR });
+    const promoted = await queue.promoteToUpload("id-1", "/p", "T", meta);
+    expect(promoted).toMatchObject({ stage: "upload", deferred: true, meta });
+  });
+
+  it("a deferred item enqueued straight away (cooldown) has no meta (#7)", async () => {
+    const { queue } = setup();
+    const item = await queue.enqueue({ url: "u", stage: "download", error: "429", deferredUntil: 7 * HOUR });
+    expect(item.deferred).toBe(true);
+    expect(item.meta).toBeUndefined();
+  });
+
+  it("enqueue keeps the meta of an upload-stage item", async () => {
+    const { queue } = setup();
+    const item = await queue.enqueue({ url: "u", stage: "upload", epubPath: "/p", title: "T", meta, error: "e" });
+    expect(item.meta).toEqual(meta);
   });
 });
 

@@ -25,6 +25,7 @@ beforeEach(async () => {
     kindlePort: 2222,
     remotePath: "/mnt/us/documents/",
     queuePath: join(root, "queue.json"),
+    followsPath: join(root, "follows.json"),
     spoolDir: join(root, "spool"),
     giveUpAfterMs: 30 * MIN,
     retryBackoffMinutes: [1, 2, 4, 8, 15],

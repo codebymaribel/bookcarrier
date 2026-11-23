@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createBot } from "../telegram/index.js";
 import { createPipeline, type PipelineDeps, type RequestConfig } from "./pipeline.js";
 import type { Logger, ResolvedConfig } from "../shared/index.js";
+import type { FicMeta } from "./fic-meta.js";
 import {
   DownloadFailedError,
   DownloadLaunchError,
@@ -160,7 +161,10 @@ describe("request flow — what each step receives", () => {
   it("the downloader gets the CANONICAL url and the item's spool directory", async () => {
     const { handle, deps } = setup();
     await handle(`look: https://www.archiveofourown.org/works/65164981/chapters/9?view_adult=true#top`);
-    expect(deps.download).toHaveBeenCalledWith(LINK, ITEM_DIR, { timeoutMs: 123_000 });
+    expect(deps.download).toHaveBeenCalledWith(LINK, ITEM_DIR, {
+      timeoutMs: 123_000,
+      workId: "65164981",
+    });
   });
 
   it("the uploader gets the downloaded file and the options mapped from config", async () => {
@@ -175,6 +179,77 @@ describe("request flow — what each step receives", () => {
       connectTimeoutSec: 7,
       timeoutMs: 45_000,
     });
+  });
+});
+
+describe("request flow — chapter metadata (feature 5, R2.3, R2.5)", () => {
+  const META: FicMeta = {
+    workId: "65164981",
+    url: LINK,
+    title: "Title",
+    author: "A",
+    chapters: 4,
+    status: "in-progress",
+  };
+
+  it("a download whose upload failed transiently is enqueued with its meta", async () => {
+    const { handle, queue } = setup({
+      download: vi.fn(async () => ({ ...RESULT, meta: META })),
+      upload: vi.fn().mockRejectedValue(UNREACHABLE),
+    });
+    await handle(LINK);
+    expect(queue.items()[0]?.meta).toEqual(META);
+  });
+
+  const { epubPath: _e, title: _t, ...rest } = queued({ stage: "download" });
+  const downloadStageItem: QueueItem = rest;
+
+  it("a retried download is promoted with the download's meta and the work id is derived from the item URL", async () => {
+    const download = vi.fn(async () => ({ ...RESULT, meta: META }));
+    const { pipeline, notify, queue } = setup(
+      { download, upload: vi.fn().mockRejectedValue(UNREACHABLE) },
+      { initial: [downloadStageItem] },
+    );
+    await pipeline.processDue(queue.items(), notify);
+    expect(queue.items()[0]).toMatchObject({ stage: "upload", meta: META });
+    expect(download).toHaveBeenCalledWith(
+      downloadStageItem.url,
+      expect.any(String),
+      expect.objectContaining({ workId: "65164981" }),
+    );
+  });
+
+  it("a deferred item promoted on a retry carries its meta and keeps deferred (#7)", async () => {
+    const { pipeline, notify, queue } = setup(
+      { download: vi.fn(async () => ({ ...RESULT, meta: META })), upload: vi.fn().mockRejectedValue(UNREACHABLE) },
+      { initial: [{ ...downloadStageItem, deferred: true }] },
+    );
+    await pipeline.processDue(queue.items(), notify);
+    expect(queue.items()[0]).toMatchObject({ stage: "upload", meta: META, deferred: true });
+  });
+
+  it("a link deferred straight away (cooldown) is enqueued without meta and not downloaded", async () => {
+    const { handle, queue, deps } = setup(
+      {},
+      { initial: [{ ...downloadStageItem, id: "q-0", deferred: true, nextAttemptAt: 2 * HOUR }] },
+    );
+    await handle(LINK);
+    expect(deps.download).not.toHaveBeenCalled();
+    const added = queue.items().find((i) => i.id === "req-1");
+    expect(added).toMatchObject({ deferred: true, stage: "download" });
+    expect(added?.meta).toBeUndefined();
+  });
+
+  it("a metaWarning from the downloader is logged with the work id and the delivery still happens", async () => {
+    const { handle, logger, replies } = setup({
+      download: vi.fn(async () => ({ ...RESULT, metaWarning: "no chapter metadata for work 65164981: x" })),
+    });
+    await handle(LINK);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "no chapter metadata for work 65164981: x",
+      expect.objectContaining({ workId: "65164981" }),
+    );
+    expect(replies.at(-1)).toBe(messages.delivered("Title"));
   });
 });
 
@@ -504,6 +579,7 @@ const botConfig: ResolvedConfig = {
   kindlePort: 2222,
   remotePath: "/mnt/us/documents/books/",
   queuePath: "/q/queue.json",
+  followsPath: "/q/follows.json",
   spoolDir: SPOOL,
   giveUpAfterMs: 30 * MIN,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
