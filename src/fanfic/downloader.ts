@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { appendTail, summarizeStderr } from "../shared/subprocess.js";
+import { appendTail, summarizeStderr } from "../shared/index.js";
 
 export const FANFICFARE_BIN = "fanficfare";
 

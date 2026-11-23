@@ -5,7 +5,7 @@ import {
   UploadConfigError,
   UploadFailedError,
 } from "./ssh.js";
-import { appendTail, summarizeStderr } from "../shared/subprocess.js";
+import { appendTail, summarizeStderr } from "../shared/index.js";
 
 // The error classes live in ssh.ts (shared with `existsOnKindle`); re-exported so existing imports
 // from "./uploader.js" keep working.

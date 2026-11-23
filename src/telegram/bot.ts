@@ -1,14 +1,13 @@
 import { Bot, type BotConfig, type Context, InlineKeyboard } from "grammy";
-import type { ResolvedConfig } from "../shared/config.js";
+import { logger as defaultLogger, type ResolvedConfig } from "../shared/index.js";
 import {
   type ChatIO,
   createDocumentFlow,
   type DocumentConfig,
   type DocumentFlow,
   telegramDownloader,
-} from "../documents/flow.js";
-import type { Pipeline, Send } from "../fanfic/pipeline.js";
-import { logger as defaultLogger } from "../shared/logger.js";
+} from "../documents/index.js";
+import type { Pipeline, Send } from "../fanfic/index.js";
 
 /**
  * Global grammY middleware that only lets the owner through (R1.1).

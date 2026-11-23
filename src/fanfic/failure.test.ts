@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DownloadFailedError, DownloadLaunchError } from "./downloader.js";
 import { classifyFailure, isRateLimited } from "./failure.js";
-import { UploadConfigError, UploadFailedError } from "../kindle/uploader.js";
+import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
 
 const fff = (stderr: string) =>
   new DownloadFailedError("exit-code", `fanficfare exited with code 1: ${stderr}`, stderr);

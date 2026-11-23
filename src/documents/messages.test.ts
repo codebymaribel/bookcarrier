@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { documentFailureMessage, messages } from "./messages.js";
-import { TelegramDownloadError, TelegramFileTooBigError } from "../documents/telegram-file.js";
-import { UploadConfigError, UploadFailedError } from "../kindle/uploader.js";
+import { TelegramDownloadError, TelegramFileTooBigError } from "./telegram-file.js";
+import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
 
 const MB = 1024 * 1024;
 
@@ -80,5 +80,19 @@ describe("documentFailureMessage (R6.3, R6.4, R7.3, R7.4)", () => {
   it("anything else → unexpected", () => {
     expect(documentFailureMessage(new Error("bug"), "x.pdf")).toBe(messages.unexpected);
     expect(documentFailureMessage("not even an error", "x.pdf")).toBe(messages.unexpected);
+  });
+});
+
+// uploadConfig and unexpected are re-exposed from the kindle and shared contexts; pin their exact
+// wording here so a change over there cannot silently alter what the owner reads about a document.
+describe("document messages re-exposed from other contexts", () => {
+  it("uploadConfig keeps its exact text", () => {
+    expect(messages.uploadConfig("SSH key not found: /keys/kindle")).toBe(
+      "I can't send to the Kindle because of a configuration problem: SSH key not found: /keys/kindle",
+    );
+  });
+
+  it("unexpected keeps its exact text", () => {
+    expect(messages.unexpected).toBe("Something unexpected went wrong. Check the logs.");
   });
 });

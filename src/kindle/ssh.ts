@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { appendTail, summarizeStderr } from "../shared/subprocess.js";
+import { appendTail, summarizeStderr } from "../shared/index.js";
 
 /** Who and how to connect: what both `ssh` and `scp` need. */
 export type SshTarget = {

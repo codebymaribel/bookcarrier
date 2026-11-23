@@ -299,26 +299,39 @@ A few deliberate choices:
 ## Project layout
 
 ```
-src/
+src/              one folder per bounded context; each exposes an index.ts, the only thing
+                  other contexts import; unit tests sit next to the module they test (*.test.ts)
   index.ts        entrypoint: loads the config, checks binaries, starts long polling
-  daemon.ts       startup: restores the queue, reconciles the spool, arms the retry timer
-  bot.ts          owner filter + the request flow (orchestration)
-  errors.ts       transient vs permanent failure classification, AO3 rate-limit (429) detection
-  binaries.ts     startup check that fanficfare, scp and ssh are on the PATH
-  queue/          retry queue: state file, backoff, spool, single timer
-  messages.ts     every text sent to the owner, and the error → message mapping
-  ao3-link.ts     finds and validates the AO3 work link in a message
-  downloader.ts   FanFicFare subprocess wrapper
-  uploader.ts     scp subprocess wrapper
-  ssh.ts          SSH options and key check shared by scp and ssh; existence check on the Kindle
-  document.ts     document validation and file name sanitization
-  document-flow.ts the document flow (orchestration), including the Replace/Cancel question
-  telegram-file.ts downloads a file sent to the bot (getFile + fetch), without leaking the token
-  pending.ts      in-memory pending Replace/Cancel questions, with a 10-minute expiry
-  subprocess.ts   helpers shared by the subprocess wrappers
-  config.ts       loads and validates ~/.bookcarrier/config.json
-  logger.ts       small logger (levels + timestamps)
-test/             Vitest tests, one file per module
+  app/            composition root
+    daemon.ts       startup: restores the queue, reconciles the spool, arms the retry timer
+    binaries.ts     startup check that fanficfare, scp and ssh are on the PATH
+  telegram/       Telegram interface
+    bot.ts          owner filter, text/document handlers and the Replace/Cancel buttons
+  fanfic/         fics shared as AO3 links
+    pipeline.ts     the request and retry flow (orchestration), one operation at a time
+    ao3-link.ts     finds and validates the AO3 work link in a message
+    downloader.ts   FanFicFare subprocess wrapper
+    failure.ts      transient vs permanent failure classification, AO3 rate-limit (429) detection
+    messages.ts     every text about fics, and their error → message mapping
+  documents/      documents sent to the bot as files
+    flow.ts         the document flow (orchestration), including the Replace/Cancel question
+    document.ts     document validation and file name sanitization
+    telegram-file.ts downloads a file sent to the bot (getFile + fetch), without leaking the token
+    pending.ts      in-memory pending Replace/Cancel questions, with a 10-minute expiry
+    messages.ts     every text about documents, and their error → message mapping
+  retry-queue/    retry queue
+    queue.ts        backoff, give-up window and AO3 rate-limit deferral policy
+    state.ts        the persisted queue file (atomic writes, corrupt-file backup)
+    spool.ts        one directory per queued request, holding its EPUB
+    scheduler.ts    the single timer that wakes up for the next due item
+    messages.ts     the corrupt-queue-file notice
+  kindle/         delivery to the Kindle
+    uploader.ts     scp subprocess wrapper
+    ssh.ts          SSH options and key check shared by scp and ssh; existence check on the Kindle
+    messages.ts     the Kindle configuration-problem text
+  shared/         config.ts (loads and validates ~/.bookcarrier/config.json), logger.ts,
+                  subprocess.ts (helpers for the subprocess wrappers), messages.ts (generic text)
+test/             Vitest tests of bookcarrierctl, the launchd plist and the SwiftBar template
 docs/specs/       the specifications (see below)
 launchd/          template LaunchAgent plist
 bin/              bookcarrierctl, the control panel script

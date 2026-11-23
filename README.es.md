@@ -26,7 +26,7 @@ celular ──enviar archivo──▶ bot de Telegram ──▶ Bookcarrier ─�
 - Tiene un panel de control: `bookcarrierctl` en la terminal y un ítem en la barra de menú (SwiftBar) para arrancar, frenar y revisar el demonio (ver [Panel de control](#panel-de-control)).
 - Solo le responde a **vos**: los mensajes de cualquier otra cuenta de Telegram se ignoran sin responder.
 
-> Los mensajes del bot están en inglés. Todos viven en un solo archivo, `src/messages.ts`, por si querés traducirlos.
+> Los mensajes del bot están en inglés. Cada contexto tiene los suyos en su `messages.ts` (`src/fanfic/`, `src/documents/`, `src/retry-queue/`, `src/kindle/`, `src/shared/`), por si querés traducirlos.
 
 ## Requisitos
 
@@ -303,26 +303,39 @@ Algunas decisiones deliberadas:
 ## Estructura del proyecto
 
 ```
-src/
+src/              una carpeta por contexto (bounded context); cada una expone un index.ts, lo único
+                  que importan los demás contextos; los tests unitarios van junto al módulo (*.test.ts)
   index.ts        punto de entrada: carga la config, verifica binarios e inicia el long polling
-  daemon.ts       arranque: restaura la cola, reconcilia el spool, arma el timer de reintentos
-  bot.ts          filtro de dueño + el flujo de cada pedido (orquestación)
-  errors.ts       clasificación de fallos en transitorios y permanentes, detección del límite de AO3 (429)
-  binaries.ts     verificación de arranque de que fanficfare, scp y ssh estén en el PATH
-  queue/          cola de reintentos: archivo de estado, backoff, spool, timer único
-  messages.ts     todos los textos al dueño, y el mapeo error → mensaje
-  ao3-link.ts     encuentra y valida el link a un work de AO3 en un mensaje
-  downloader.ts   wrapper del subproceso de FanFicFare
-  uploader.ts     wrapper del subproceso de scp
-  ssh.ts          opciones SSH y chequeo de la llave compartidos por scp y ssh; chequeo de existencia en la Kindle
-  document.ts     validación de documentos y sanitización del nombre de archivo
-  document-flow.ts el flujo de documentos (orquestación), incluida la pregunta Replace/Cancel
-  telegram-file.ts descarga un archivo enviado al bot (getFile + fetch) sin filtrar el token
-  pending.ts      preguntas Replace/Cancel pendientes, en memoria, con vencimiento a los 10 minutos
-  subprocess.ts   utilidades compartidas por los wrappers de subprocesos
-  config.ts       carga y valida ~/.bookcarrier/config.json
-  logger.ts       logger simple (niveles + timestamps)
-test/             tests con Vitest, un archivo por módulo
+  app/            raíz de composición
+    daemon.ts       arranque: restaura la cola, reconcilia el spool, arma el timer de reintentos
+    binaries.ts     verificación de arranque de que fanficfare, scp y ssh estén en el PATH
+  telegram/       interfaz de Telegram
+    bot.ts          filtro de dueño, handlers de texto y documentos, y los botones Replace/Cancel
+  fanfic/         fics compartidos como links de AO3
+    pipeline.ts     el flujo de pedidos y reintentos (orquestación), de a una operación por vez
+    ao3-link.ts     encuentra y valida el link a un work de AO3 en un mensaje
+    downloader.ts   wrapper del subproceso de FanFicFare
+    failure.ts      clasificación de fallos en transitorios y permanentes, detección del límite de AO3 (429)
+    messages.ts     todos los textos sobre fics, y su mapeo error → mensaje
+  documents/      documentos enviados al bot como archivo
+    flow.ts         el flujo de documentos (orquestación), incluida la pregunta Replace/Cancel
+    document.ts     validación de documentos y sanitización del nombre de archivo
+    telegram-file.ts descarga un archivo enviado al bot (getFile + fetch) sin filtrar el token
+    pending.ts      preguntas Replace/Cancel pendientes, en memoria, con vencimiento a los 10 minutos
+    messages.ts     todos los textos sobre documentos, y su mapeo error → mensaje
+  retry-queue/    cola de reintentos
+    queue.ts        política de backoff, ventana de reintentos y diferido por el límite de AO3
+    state.ts        el archivo persistido de la cola (escrituras atómicas, respaldo si está corrupto)
+    spool.ts        un directorio por pedido en cola, con su EPUB
+    scheduler.ts    el timer único que despierta para el próximo pedido pendiente
+    messages.ts     el aviso de archivo de cola corrupto
+  kindle/         entrega a la Kindle
+    uploader.ts     wrapper del subproceso de scp
+    ssh.ts          opciones SSH y chequeo de la llave compartidos por scp y ssh; chequeo de existencia en la Kindle
+    messages.ts     el texto de problema de configuración de la Kindle
+  shared/         config.ts (carga y valida ~/.bookcarrier/config.json), logger.ts,
+                  subprocess.ts (utilidades de los wrappers de subprocesos), messages.ts (texto genérico)
+test/             tests con Vitest de bookcarrierctl, el plist de launchd y la plantilla de SwiftBar
 docs/specs/       las especificaciones (ver abajo)
 launchd/          plist de plantilla para el LaunchAgent
 bin/              bookcarrierctl, el script del panel de control

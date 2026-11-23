@@ -1,18 +1,16 @@
 import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
-import { createBot } from "../telegram/bot.js";
+import { createBot } from "../telegram/index.js";
 import { createPipeline, type PipelineDeps, type RequestConfig } from "./pipeline.js";
-import type { ResolvedConfig } from "../shared/config.js";
+import type { Logger, ResolvedConfig } from "../shared/index.js";
 import {
   DownloadFailedError,
   DownloadLaunchError,
   type DownloadResult,
 } from "./downloader.js";
-import type { Logger } from "../shared/logger.js";
-import { messages } from "../telegram/messages.js";
-import { createQueue, type Queue } from "../retry-queue/queue.js";
-import type { QueueItem, QueueState } from "../retry-queue/state.js";
-import { UploadConfigError, UploadFailedError } from "../kindle/uploader.js";
+import { messages } from "./messages.js";
+import { createQueue, type Queue, type QueueItem, type QueueState } from "../retry-queue/index.js";
+import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
 
 const MIN = 60_000;
 
@@ -787,7 +785,7 @@ describe("createBot — wiring", () => {
 
   it("notifyOwner sends to the owner's chat (used by retries and startup notices)", async () => {
     const { bot, sent } = botWith({});
-    const { notifyOwner } = await import("../telegram/bot.js");
+    const { notifyOwner } = await import("../telegram/index.js");
     await notifyOwner(bot, OWNER)("hello");
     expect(sent).toEqual([{ chatId: OWNER, text: "hello" }]);
   });

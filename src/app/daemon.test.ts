@@ -2,10 +2,10 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ResolvedConfig } from "../shared/config.js";
+import type { ResolvedConfig } from "../shared/index.js";
 import { createDaemon } from "./daemon.js";
-import { messages } from "../telegram/messages.js";
-import type { QueueItem } from "../retry-queue/state.js";
+import { messages } from "../fanfic/index.js";
+import { messages as queueMessages, type QueueItem } from "../retry-queue/index.js";
 
 const MIN = 60_000;
 let root: string;
@@ -125,7 +125,7 @@ describe("startup restoration (R2.3, R5.3, acceptance 4)", () => {
     const backups = (await readdir(root)).filter((n) => n.startsWith("queue.json.corrupt-"));
     expect(backups).toHaveLength(1);
     await vi.waitFor(() =>
-      expect(notify).toHaveBeenCalledWith(messages.queueFileCorrupt(join(root, backups[0]!))),
+      expect(notify).toHaveBeenCalledWith(queueMessages.queueFileCorrupt(join(root, backups[0]!))),
     );
     daemon.stop();
   });
