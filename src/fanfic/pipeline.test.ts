@@ -39,6 +39,11 @@ const TRANSIENT_DOWNLOAD = new DownloadFailedError(
   "fanficfare exited with code 1: HTTP Error 429: Too Many Requests",
   "HTTP Error 429: Too Many Requests",
 );
+const UNAVAILABLE_DOWNLOAD = new DownloadFailedError(
+  "exit-code",
+  "fanficfare exited with code 1: HTTP Error 503: Service Unavailable",
+  "Traceback (most recent call last):\nHTTP Error 503: Service Unavailable",
+);
 const PERMANENT_DOWNLOAD = new DownloadFailedError(
   "exit-code",
   "fanficfare exited with code 1: Story does not exist",
@@ -303,13 +308,37 @@ describe("enqueueing (R1, R6.1)", () => {
   });
 
   it("the subprocess's stderr goes to the log, never to the owner", async () => {
-    const { handle, replies, logger } = setup({ download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) });
+    const { handle, replies, logger } = setup({ download: vi.fn().mockRejectedValue(UNAVAILABLE_DOWNLOAD) });
     await handle(LINK);
-    expect(replies.join("\n")).not.toContain("Too Many Requests\n");
+    expect(replies.join("\n")).not.toContain(UNAVAILABLE_DOWNLOAD.stderr);
     expect(logger.error).toHaveBeenCalledWith(
       "request failed",
-      expect.objectContaining({ stderr: TRANSIENT_DOWNLOAD.stderr }),
+      expect.objectContaining({ error: UNAVAILABLE_DOWNLOAD, stderr: UNAVAILABLE_DOWNLOAD.stderr }),
     );
+  });
+
+  it("a 429 is logged as one WARN line: download failed -> 429 Client Error: Too Many Requests", async () => {
+    const { handle, logger } = setup({ download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) });
+    await handle(LINK);
+    expect(logger.warn).toHaveBeenCalledWith("download failed -> 429 Client Error: Too Many Requests", {
+      workId: "65164981",
+    });
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("a retried 429 is logged as one WARN line: download failed -> 429 Client Error: Too Many Requests", async () => {
+    const item = queued({ stage: "download", lastError: TRANSIENT_DOWNLOAD.message });
+    delete item.title;
+    delete item.epubPath;
+    const { pipeline, notify, logger } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [item], now: () => 1 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(logger.warn).toHaveBeenCalledWith("download failed -> 429 Client Error: Too Many Requests", {
+      workId: "65164981",
+    });
+    expect(logger.warn).not.toHaveBeenCalledWith("retry failed", expect.anything());
   });
 
   it("a failure cleaning the spool is logged and does not change the outcome", async () => {
