@@ -16,7 +16,7 @@ Branch `refactor/ddd-layout` from `main`.
 - [x] T1 move modules and tests into context folders, fix imports and configs; errors → fanfic/failure — S1, S3, S4 (rename) — inline — commit: d9aadc5
 - [x] T2 extract pipeline from bot.ts into fanfic/pipeline.ts (and its flow tests) — S4 — inline — commit: 3906630
 - [x] T3 context index.ts public APIs, cross-context imports through them — S2 — inline; messages split per context (L3); binaries → app — commit: aafc56a
-- [x] T4 README EN/ES layout — S5 — inline — commit: (this commit)
+- [x] T4 README EN/ES layout — S5 — inline — commit: 96145e7
 
 ## Log
 
