@@ -1,10 +1,10 @@
 import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
 import { createBot, OVERWRITE_DATA } from "./bot.js";
-import type { ResolvedConfig } from "../shared/config.js";
-import { createDocumentFlow, type DocumentFlow } from "../documents/flow.js";
-import { messages } from "./messages.js";
-import { createPendingStore } from "../documents/pending.js";
+import type { ResolvedConfig } from "../shared/index.js";
+import { createDocumentFlow, type DocumentFlow } from "../documents/index.js";
+import { messages } from "../documents/index.js";
+import { createPendingStore } from "../documents/index.js";
 
 const OWNER = 42;
 const STRANGER = 99;

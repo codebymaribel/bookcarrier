@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatIO, DocumentConfig, DocumentDeps } from "./flow.js";
 import { createDocumentFlow } from "./flow.js";
-import { formatLine, type Logger } from "../shared/logger.js";
-import { messages } from "../telegram/messages.js";
+import { formatLine, type Logger } from "../shared/index.js";
+import { messages } from "./messages.js";
 import { createPendingStore } from "./pending.js";
 import { TelegramDownloadError, TelegramFileTooBigError } from "./telegram-file.js";
-import { UploadConfigError, UploadFailedError } from "../kindle/uploader.js";
+import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
 
 const TOKEN = "123456:SECRET-token_value";
 const BOOKS = "/mnt/us/documents/books/";

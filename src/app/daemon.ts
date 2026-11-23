@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { createPipeline, type Pipeline, type PipelineDeps, type Send } from "../fanfic/pipeline.js";
-import type { ResolvedConfig } from "../shared/config.js";
-import { downloadEpub } from "../fanfic/downloader.js";
-import type { Logger } from "../shared/logger.js";
-import { messages } from "../telegram/messages.js";
-import { createQueue, type Queue } from "../retry-queue/queue.js";
-import { createScheduler, type Scheduler } from "../retry-queue/scheduler.js";
-import { createSpool } from "../retry-queue/spool.js";
-import { createStateStore } from "../retry-queue/state.js";
-import { uploadToKindle } from "../kindle/uploader.js";
+import { createPipeline, type Pipeline, type PipelineDeps, type Send } from "../fanfic/index.js";
+import type { ResolvedConfig } from "../shared/index.js";
+import { downloadEpub } from "../fanfic/index.js";
+import type { Logger } from "../shared/index.js";
+import { messages } from "../retry-queue/index.js";
+import { createQueue, type Queue } from "../retry-queue/index.js";
+import { createScheduler, type Scheduler } from "../retry-queue/index.js";
+import { createSpool } from "../retry-queue/index.js";
+import { createStateStore } from "../retry-queue/index.js";
+import { uploadToKindle } from "../kindle/index.js";
 
 export type Daemon = {
   queue: Queue;

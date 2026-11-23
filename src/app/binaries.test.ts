@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkRequiredBinaries, findMissingBinaries } from "./binaries.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../shared/index.js";
 
 type Entry = { level: "info" | "warn" | "error"; message: string; meta?: Record<string, unknown> };
 

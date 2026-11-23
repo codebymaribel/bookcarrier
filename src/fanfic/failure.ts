@@ -1,5 +1,5 @@
 import { DownloadFailedError } from "./downloader.js";
-import { UploadFailedError } from "../kindle/uploader.js";
+import { UploadFailedError } from "../kindle/index.js";
 
 /**
  * Is this failure worth retrying? The single question the whole retry queue depends on (design.md).

@@ -2,11 +2,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
-import { createBot } from "../telegram/bot.js";
-import type { ResolvedConfig } from "../shared/config.js";
+import { createBot } from "../telegram/index.js";
+import type { ResolvedConfig } from "../shared/index.js";
 import { createDocumentFlow, telegramDownloader, type ChatIO } from "./flow.js";
-import { createLogger } from "../shared/logger.js";
-import { messages } from "../telegram/messages.js";
+import { createLogger } from "../shared/index.js";
+import { messages } from "./messages.js";
 import { createPendingStore } from "./pending.js";
 
 const TOKEN = "777777:ZZSECRETTOKENZZ";

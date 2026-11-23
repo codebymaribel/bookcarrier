@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GrammyError } from "grammy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatLine } from "../shared/logger.js";
+import { formatLine } from "../shared/index.js";
 import {
   downloadTelegramFile,
   TelegramDownloadError,

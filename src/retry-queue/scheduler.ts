@@ -1,4 +1,4 @@
-import type { Logger } from "../shared/logger.js";
+import type { Logger } from "../shared/index.js";
 import type { QueueItem } from "./state.js";
 
 /** setTimeout's largest delay (~24.8 days); longer waits are clamped and re-armed on wake-up. */

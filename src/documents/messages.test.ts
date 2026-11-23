@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { documentFailureMessage, messages } from "./messages.js";
-import { TelegramDownloadError, TelegramFileTooBigError } from "../documents/telegram-file.js";
-import { UploadConfigError, UploadFailedError } from "../kindle/uploader.js";
+import { TelegramDownloadError, TelegramFileTooBigError } from "./telegram-file.js";
+import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
 
 const MB = 1024 * 1024;
 
