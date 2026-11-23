@@ -1,9 +1,10 @@
 import type { Bot } from "grammy";
-import { checkRequiredBinaries } from "./binaries.js";
-import { createBot, notifyOwner, type Send } from "./bot.js";
-import { ConfigError, loadConfig, type ResolvedConfig } from "./config.js";
-import { createDaemon, pollUntilStopped } from "./daemon.js";
-import { logger } from "./logger.js";
+import { checkRequiredBinaries } from "./shared/binaries.js";
+import type { Send } from "./fanfic/pipeline.js";
+import { createBot, notifyOwner } from "./telegram/bot.js";
+import { ConfigError, loadConfig, type ResolvedConfig } from "./shared/config.js";
+import { createDaemon, pollUntilStopped } from "./app/daemon.js";
+import { logger } from "./shared/logger.js";
 
 /**
  * Loads the config; if it is invalid the daemon does not start and the log says which field is
