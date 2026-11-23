@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DownloadFailedError, DownloadLaunchError } from "../src/downloader.js";
-import { classifyFailure } from "../src/errors.js";
+import { classifyFailure, isRateLimited } from "../src/errors.js";
 import { UploadConfigError, UploadFailedError } from "../src/uploader.js";
 
 const fff = (stderr: string) =>
@@ -92,5 +92,30 @@ describe("classifyFailure — anything else", () => {
   it("an unexpected error (a bug, an I/O error) → permanent: it is reported, never retried", () => {
     expect(classifyFailure(new Error("boom"))).toBe("permanent");
     expect(classifyFailure("not even an error")).toBe("permanent");
+  });
+});
+
+describe("isRateLimited (S2)", () => {
+  it.each([
+    "urllib.error.HTTPError: HTTP Error 429: Too Many Requests",
+    "requests.exceptions.HTTPError: 429 Client Error: Too Many Requests for url: https://archiveofourown.org/works/1",
+    "HTTPErrorFFF: HTTP Error in FFF 'Too Many Requests'(429)",
+  ])("a FanFicFare 429 → true: %s", (stderr) => {
+    expect(isRateLimited(fff(stderr))).toBe(true);
+  });
+
+  it("matches the message when the stderr is empty", () => {
+    expect(isRateLimited(new DownloadFailedError("exit-code", "429 Client Error: Too Many Requests"))).toBe(true);
+  });
+
+  it.each([
+    ["AO3 403", fff("HTTPErrorFFF: HTTP Error in FFF '403 Forbidden'(403)")],
+    ["AO3 525", fff("HTTPErrorFFF: HTTP Error in FFF 'error'(525)")],
+    ["a timeout", new DownloadFailedError("timeout", "timed out after 600s")],
+    ["a work id containing 429", fff("StoryDoesNotExist: https://archiveofourown.org/works/14290")],
+    ["an upload failure", new UploadFailedError("exit-code", "scp: Too Many Requests 429")],
+    ["a plain error", new Error("429 Too Many Requests")],
+  ])("%s → false", (_name, err) => {
+    expect(isRateLimited(err)).toBe(false);
   });
 });

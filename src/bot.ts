@@ -9,7 +9,7 @@ import {
   telegramDownloader,
 } from "./document-flow.js";
 import { DownloadFailedError, type DownloadResult, type downloadEpub } from "./downloader.js";
-import { classifyFailure } from "./errors.js";
+import { classifyFailure, isRateLimited } from "./errors.js";
 import { logger as defaultLogger, type Logger } from "./logger.js";
 import { failureMessage, messages } from "./messages.js";
 import type { Queue } from "./queue/queue.js";
@@ -48,6 +48,8 @@ export type RequestConfig = Pick<
   | "kindleHost"
   | "giveUpAfterMs"
   | "retryBackoffMinutes"
+  | "deferredRetryMs"
+  | "deferredGiveUpAfterMs"
 >;
 
 /** Everything the pipeline touches outside itself, injectable so tests need no subprocess or disk. */
@@ -55,9 +57,11 @@ export type PipelineDeps = {
   download: typeof downloadEpub;
   upload: typeof uploadToKindle;
   spool: Pick<Spool, "prepare" | "discard">;
-  queue: Pick<Queue, "enqueue" | "promoteToUpload" | "recordFailure" | "remove">;
+  queue: Pick<Queue, "enqueue" | "promoteToUpload" | "recordFailure" | "remove" | "cooldownUntil">;
   newId: () => string;
   logger: Logger;
+  /** Clock for the cooldown message; defaults to `Date.now`. */
+  now?: () => number;
 };
 
 /** Sends one text to the owner; failures are the caller's to swallow. */
@@ -97,6 +101,11 @@ function errorText(err: unknown): string {
  * or gives up past the window: spool cleaned and owner told the last error (R4, R6.4). A permanent
  * failure on a retry is removed and reported.
  *
+ * Rate-limit deferral: when the window runs out while AO3 still answers 429, the item is kept as
+ * deferred (spool and all), the owner is told once, and it is retried every `deferredRetryMs`
+ * until `deferredGiveUpAfterMs` after its first enqueue. While any item is deferred, a new link is
+ * deferred straight away (to the earliest deferred attempt) instead of hitting AO3 again.
+ *
  * All download/upload work, from requests and retries alike, runs one at a time through a single
  * promise chain: AO3 sees one request at a time and two fic scp never race for the Kindle. Documents
  * sent as files (document-flow.ts) do not join this chain; by default they go to a different folder.
@@ -104,6 +113,8 @@ function errorText(err: unknown): string {
 export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipeline {
   const { logger, spool, queue } = deps;
   const windowMinutes = Math.round(config.giveUpAfterMs / 60_000);
+  const deferredLimitHours = Math.round(config.deferredGiveUpAfterMs / 3_600_000);
+  const now = deps.now ?? Date.now;
 
   const uploadOptions: UploadOptions = {
     sshKeyPath: config.sshKeyPath,
@@ -152,8 +163,28 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
       return;
     }
 
-    await say(messages.ack);
     const id = deps.newId();
+
+    // S6: AO3 is cooling down (some request is deferred by its rate limit): do not hit it again.
+    const cooldownUntil = queue.cooldownUntil();
+    if (cooldownUntil !== undefined) {
+      try {
+        await queue.enqueue({
+          id,
+          url: link.canonicalUrl,
+          stage: "download",
+          error: messages.rateLimitedReason,
+          deferredUntil: cooldownUntil,
+        });
+        logger.info("deferred during the AO3 cooldown", { workId: link.workId, id, cooldownUntil });
+        await say(messages.deferredNew(cooldownUntil - now(), deferredLimitHours));
+        return;
+      } catch (err) {
+        logger.error("could not defer during the cooldown; trying now", { workId: link.workId, error: err });
+      }
+    }
+
+    await say(messages.ack);
     logger.info("request accepted", { workId: link.workId, id });
 
     await exclusive(async () => {
@@ -215,13 +246,30 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
         await safely(notify, failureMessage(err, current.title));
         return;
       }
-      const outcome = await queue.recordFailure(current.id, errorText(err));
+      const name = current.title ?? current.url;
+      const outcome = await queue.recordFailure(current.id, errorText(err), {
+        rateLimited: isRateLimited(err),
+      });
+      if (outcome.deferred) {
+        // S1, S5: the window ran out under AO3's rate limit; kept (with its spool) for later.
+        logger.warn("deferred by the AO3 rate limit", {
+          id: current.id,
+          nextAttemptAt: outcome.item.nextAttemptAt,
+        });
+        await safely(
+          notify,
+          messages.deferred(name, outcome.item.nextAttemptAt - now(), deferredLimitHours),
+        );
+        return;
+      }
       if (!outcome.giveUp) return;
       logger.warn("gave up", { id: current.id, lastError: outcome.item.lastError });
       await discard(current.id);
       await safely(
         notify,
-        messages.gaveUp(current.title ?? current.url, outcome.item.lastError, windowMinutes),
+        outcome.item.deferred === true
+          ? messages.gaveUpDeferred(name, outcome.item.lastError, deferredLimitHours)
+          : messages.gaveUp(name, outcome.item.lastError, windowMinutes),
       );
     }
   };

@@ -122,6 +122,26 @@ describe("loadConfig", () => {
     expect(config.retryBackoffMinutes).toEqual([1, 2, 4, 8, 15]);
   });
 
+  it("the rate-limit deferral defaults: retry every 2 h, give up 24 h after the first enqueue (S3, S4)", async () => {
+    const config = await loadConfig(await writeConfig(valid));
+    expect(config.deferredRetryMs).toBe(7_200_000);
+    expect(config.deferredGiveUpAfterMs).toBe(86_400_000);
+  });
+
+  it("accepts rate-limit deferral overrides and rejects non-positive ones", async () => {
+    const config = await loadConfig(
+      await writeConfig({ ...valid, deferredRetryMs: 3_600_000, deferredGiveUpAfterMs: 43_200_000 }),
+    );
+    expect(config.deferredRetryMs).toBe(3_600_000);
+    expect(config.deferredGiveUpAfterMs).toBe(43_200_000);
+    const problems = await problemsOf(
+      loadConfig(await writeConfig({ ...valid, deferredRetryMs: 0, deferredGiveUpAfterMs: "x" })),
+    );
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toMatch(/"deferredRetryMs"/);
+    expect(problems[1]).toMatch(/"deferredGiveUpAfterMs"/);
+  });
+
   it("accepts retry-queue overrides and expands ~ in their paths", async () => {
     const config = await loadConfig(
       await writeConfig({

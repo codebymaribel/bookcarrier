@@ -27,6 +27,10 @@ export type Config = {
   giveUpAfterMs?: number;
   /** Backoff ladder, one delay per retry, in minutes. */
   retryBackoffMinutes?: number[];
+  /** Rate-limit deferral: wait between retries once AO3's 429 outlasted the window above. */
+  deferredRetryMs?: number;
+  /** Rate-limit deferral: abandon a deferred request this long after it was first enqueued. */
+  deferredGiveUpAfterMs?: number;
 
   // document send (feature 3)
   /**
@@ -57,6 +61,8 @@ export const CONFIG_DEFAULTS = {
   spoolDir: join(homedir(), ".bookcarrier", "spool"),
   giveUpAfterMs: 1_800_000,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
+  deferredRetryMs: 7_200_000,
+  deferredGiveUpAfterMs: 86_400_000,
   /** The default formats and their folder (R8.1, R8.2). Never mutated: parseConfig copies it. */
   documentFolders: new Map([
     ["epub", DEFAULT_DOCUMENTS_FOLDER],
@@ -76,7 +82,9 @@ type OptionalKey =
   | "queuePath"
   | "spoolDir"
   | "giveUpAfterMs"
-  | "retryBackoffMinutes";
+  | "retryBackoffMinutes"
+  | "deferredRetryMs"
+  | "deferredGiveUpAfterMs";
 
 /** Fixed path of the real config, outside the repo (R6.1). */
 export const DEFAULT_CONFIG_PATH = join(homedir(), ".bookcarrier", "config.json");
@@ -266,6 +274,18 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     problems,
   );
   const retryBackoffMinutes = optionalLadder(raw, problems);
+  const deferredRetryMs = optionalPositiveInt(
+    raw,
+    "deferredRetryMs",
+    CONFIG_DEFAULTS.deferredRetryMs,
+    problems,
+  );
+  const deferredGiveUpAfterMs = optionalPositiveInt(
+    raw,
+    "deferredGiveUpAfterMs",
+    CONFIG_DEFAULTS.deferredGiveUpAfterMs,
+    problems,
+  );
   const documentFolders = parseDocumentFolders(raw["documentFolders"], problems);
 
   if (problems.length > 0) throw new ConfigError(problems);
@@ -285,6 +305,8 @@ export function parseConfig(raw: unknown): ResolvedConfig {
     spoolDir: expandHome(spoolDir),
     giveUpAfterMs,
     retryBackoffMinutes,
+    deferredRetryMs,
+    deferredGiveUpAfterMs,
     documentFolders,
   };
 }
