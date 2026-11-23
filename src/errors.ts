@@ -41,3 +41,24 @@ export function classifyFailure(err: unknown): FailureKind {
   if (err instanceof UploadFailedError) return "transient";
   return "permanent";
 }
+
+/**
+ * AO3 rate-limiting FanFicFare: `429 Too Many Requests` in its stderr or message. Patterns are
+ * anchored to HTTP wording, so a work id that merely contains "429" never matches.
+ */
+const RATE_LIMIT_PATTERNS: readonly RegExp[] = [
+  /Too Many Requests/i,
+  /HTTP Error 429/i,
+  /\b429 Client Error/i,
+  /\(429\)/,
+];
+
+/**
+ * Is this a download that AO3 refused because of its rate limit? Only these failures are deferred
+ * for hours once the short retry window runs out (rate-limit deferral, S2); uploads never are.
+ */
+export function isRateLimited(err: unknown): boolean {
+  if (!(err instanceof DownloadFailedError) || err.reason !== "exit-code") return false;
+  const text = `${err.stderr}\n${err.message}`;
+  return RATE_LIMIT_PATTERNS.some((re) => re.test(text));
+}

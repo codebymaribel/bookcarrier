@@ -15,7 +15,7 @@ const config: ResolvedConfig = {
   telegramToken: TOKEN, ownerId: 42, kindleUser: "root", kindleHost: "192.0.2.1", sshKeyPath: "/nonexistent/key",
   downloadTimeoutMs: 1000, uploadTimeoutMs: 1000, sshConnectTimeoutSec: 1, kindlePort: 2222,
   remotePath: "/mnt/us/documents/books/AO3/", queuePath: "/q/q.json", spoolDir: "/q/spool",
-  giveUpAfterMs: 1800000, retryBackoffMinutes: [1],
+  giveUpAfterMs: 1800000, retryBackoffMinutes: [1], deferredRetryMs: 7200000, deferredGiveUpAfterMs: 86400000,
   documentFolders: new Map([["epub", BOOKS], ["mobi", BOOKS], ["pdf", BOOKS]]),
 };
 const botInfo = { id: 1, is_bot: true as const, first_name: "B", username: "b_bot", can_join_groups: false,

@@ -28,6 +28,8 @@ beforeEach(async () => {
     spoolDir: join(root, "spool"),
     giveUpAfterMs: 30 * MIN,
     retryBackoffMinutes: [1, 2, 4, 8, 15],
+    deferredRetryMs: 7_200_000,
+    deferredGiveUpAfterMs: 86_400_000,
     documentFolders: new Map([
       ["epub", "/mnt/us/documents/books/"],
       ["mobi", "/mnt/us/documents/books/"],

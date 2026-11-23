@@ -41,6 +41,20 @@ export const messages = {
   gaveUp: (name: string, lastError: string, windowMinutes: number) =>
     `I gave up on “${name}” after ${windowMinutes} minutes of retries. Last error: ${lastError}. ` +
     "Share the link again to try once more.",
+  /** Rate-limit deferral, S1 + S5: the 30-minute window ran out while AO3 still answers 429. */
+  deferred: (name: string, retryInMs: number, limitHours: number) =>
+    `${RATE_LIMIT_TROUBLE}so I saved “${name}” and will try again in about ${formatWait(retryInMs)}. ` +
+    `I'll keep trying for up to ${limitHours} hours from your first request and tell you how it goes.`,
+  /** Rate-limit deferral, S6: a new link during the cooldown, saved without touching AO3. */
+  deferredNew: (retryInMs: number, limitHours: number) =>
+    `${RATE_LIMIT_TROUBLE}so I saved your request without downloading it and will try again in about ${formatWait(retryInMs)}. ` +
+    `I'll keep trying for up to ${limitHours} hours and tell you how it goes.`,
+  /** Rate-limit deferral, S4: a deferred request abandoned at the limit. */
+  gaveUpDeferred: (name: string, lastError: string, limitHours: number) =>
+    `I gave up on “${name}”: AO3 kept rate-limiting FanFicFare for ${limitHours} hours. Last error: ${lastError}. ` +
+    "Share the link again to try once more.",
+  /** Rate-limit deferral, S6: the `lastError` stored for a link deferred during the cooldown. */
+  rateLimitedReason: "not tried: AO3 was rate-limiting FanFicFare (429 Too Many Requests)",
   /** Feature 2, R2.5 */
   queueFileCorrupt: (backupPath: string) =>
     "The retry queue file was unreadable, so I started with an empty queue. " +
@@ -69,6 +83,17 @@ export const messages = {
     `I couldn't send “${name}” to your Kindle (${detail}). ` +
     "Is it awake and on the Wi-Fi? Send me the file again when it is.",
 } as const;
+
+const RATE_LIMIT_TROUBLE =
+  "FanFicFare is having trouble with AO3 right now (it keeps getting “429 Too Many Requests”), ";
+
+/** A wait for the owner: whole minutes up to 90 (at least 1), whole hours past that. */
+function formatWait(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes <= 90) return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hours`;
+}
 
 /** `26529382` → `"25.3 MB"`, `26214400` → `"25 MB"` (binary MB, as Telegram's limit). */
 function formatMb(bytes: number): string {

@@ -20,5 +20,7 @@
   "queuePath": "~/.bookcarrier/queue.json",
   "spoolDir": "~/.bookcarrier/spool",
   "giveUpAfterMs": 1800000,
-  "retryBackoffMinutes": [1, 2, 4, 8, 15]
+  "retryBackoffMinutes": [1, 2, 4, 8, 15],
+  "deferredRetryMs": 7200000,
+  "deferredGiveUpAfterMs": 86400000
 }

@@ -49,6 +49,14 @@ describe("readState", () => {
     expect((await createStateStore(path).read()).state).toEqual(state);
   });
 
+  it("a deferred item round-trips; deferred must be a boolean when present (S7)", async () => {
+    const deferred = { ...item("1"), deferred: true };
+    await writeFile(path, JSON.stringify({ version: 1, items: [deferred] }));
+    expect((await createStateStore(path).read()).state.items).toEqual([deferred]);
+    await writeFile(path, JSON.stringify({ version: 1, items: [{ ...item("1"), deferred: "yes" }] }));
+    expect((await createStateStore(path, () => 7).read()).corruptBackup).toBe(join(dir, "queue.json.corrupt-7"));
+  });
+
   it("corrupt JSON → renamed to .corrupt-<ts>, empty state, and signalled (R2.5)", async () => {
     await writeFile(path, "{ not json");
     const result = await createStateStore(path, () => 1_700_000_000_000).read();

@@ -31,6 +31,8 @@ const config: RequestConfig = {
   kindleHost: "192.168.1.50",
   giveUpAfterMs: 30 * MIN,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
+  deferredRetryMs: 7_200_000,
+  deferredGiveUpAfterMs: 86_400_000,
 };
 
 const LINK = "https://archiveofourown.org/works/65164981";
@@ -48,6 +50,8 @@ const PERMANENT_DOWNLOAD = new DownloadFailedError(
   "fanficfare exited with code 1: Story does not exist",
   "StoryDoesNotExist: Story does not exist",
 );
+const TIMEOUT_DOWNLOAD = new DownloadFailedError("timeout", "fanficfare timed out after 600s");
+const HOUR = 60 * MIN;
 const UNREACHABLE = new UploadFailedError("exit-code", "scp exited with code 255: Host is down");
 const BROKEN_KEY = new UploadConfigError("key-missing", "SSH key not found: /keys/kindle");
 
@@ -76,6 +80,8 @@ function setup(overrides: Partial<PipelineDeps> = {}, opts: { initial?: QueueIte
     initial: opts.initial ?? [],
     backoffMs: config.retryBackoffMinutes.map((m) => m * MIN),
     giveUpAfterMs: config.giveUpAfterMs,
+    deferredRetryMs: config.deferredRetryMs,
+    deferredGiveUpAfterMs: config.deferredGiveUpAfterMs,
     now: opts.now ?? (() => 0),
   });
   const deps: PipelineDeps = {
@@ -98,6 +104,7 @@ function setup(overrides: Partial<PipelineDeps> = {}, opts: { initial?: QueueIte
     queue,
     newId: () => `req-${++ids}`,
     logger,
+    now: opts.now ?? (() => 0),
     ...overrides,
   };
   const pipeline = createPipeline(config, deps);
@@ -273,6 +280,7 @@ describe("enqueueing (R1, R6.1)", () => {
         promoteToUpload: vi.fn(),
         recordFailure: vi.fn(),
         remove: vi.fn(),
+        cooldownUntil: vi.fn(() => undefined),
       },
     });
     await handle(LINK);
@@ -376,11 +384,11 @@ describe("retries (R3, R4, R5.2, R6)", () => {
     delete item.title;
     delete item.epubPath;
     const { pipeline, notify, notices } = setup(
-      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { download: vi.fn().mockRejectedValue(TIMEOUT_DOWNLOAD) },
       { initial: [item], now: () => 30 * MIN },
     );
     await pipeline.processDue([item], notify);
-    expect(notices).toEqual([messages.gaveUp(LINK, TRANSIENT_DOWNLOAD.message, 30)]);
+    expect(notices).toEqual([messages.gaveUp(LINK, TIMEOUT_DOWNLOAD.message, 30)]);
   });
 
   it("successful retry of stage download → promotes to upload and continues (R3.2, acceptance 5)", async () => {
@@ -505,6 +513,8 @@ const botConfig: ResolvedConfig = {
   spoolDir: SPOOL,
   giveUpAfterMs: 30 * MIN,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
+  deferredRetryMs: 7_200_000,
+  deferredGiveUpAfterMs: 86_400_000,
   documentFolders: new Map([
     ["epub", "/mnt/us/documents/books/"],
     ["mobi", "/mnt/us/documents/books/"],
@@ -543,6 +553,208 @@ function textUpdate(updateId: number, fromId: number, text: string): Update {
 
 /** Result of every fake API call; `never` is justified: the real type depends on the method and is never read. */
 const ok = () => ({ ok: true as const, result: true as never });
+
+describe("rate-limit deferral (S1–S6)", () => {
+  const downloadItem = (overrides: Partial<QueueItem>): QueueItem => {
+    const item = queued({ stage: "download", lastError: TRANSIENT_DOWNLOAD.message, ...overrides });
+    delete item.title;
+    delete item.epubPath;
+    return item;
+  };
+
+  it("a 429 at the end of the window → kept as deferred, spool kept, owner told ONCE it will be retried in 2 h (S1, S3, S5)", async () => {
+    const item = downloadItem({ attempts: 4, nextAttemptAt: 30 * MIN });
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [item], now: () => 30 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({ id: "q-1", deferred: true, nextAttemptAt: 30 * MIN + 2 * HOUR }),
+    ]);
+    expect(deps.spool.discard).not.toHaveBeenCalled();
+    expect(notices).toEqual([messages.deferred(LINK, 2 * HOUR, 24)]);
+  });
+
+  it("a failed deferred retry → silent, rescheduled 2 h later (S4, S5)", async () => {
+    const item = downloadItem({ attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const { pipeline, notify, notices, queue } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [item], now: () => 150 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(notices).toEqual([]);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({ deferred: true, attempts: 6, nextAttemptAt: 150 * MIN + 2 * HOUR }),
+    ]);
+  });
+
+  it("a deferred item past the 24 h limit → abandoned, spool cleaned, owner told the last error (S4)", async () => {
+    const item = downloadItem({ attempts: 15, nextAttemptAt: 22 * HOUR + 30 * MIN, deferred: true });
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [item], now: () => 22 * HOUR + 30 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(queue.items()).toEqual([]);
+    expect(deps.spool.discard).toHaveBeenCalledWith("q-1");
+    expect(notices).toEqual([messages.gaveUpDeferred(LINK, TRANSIENT_DOWNLOAD.message, 24)]);
+  });
+
+  it("a deferred item that downloads → delivered and the owner gets the title (S5)", async () => {
+    const item = downloadItem({ attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const { pipeline, notify, notices, queue } = setup({}, { initial: [item], now: () => 150 * MIN });
+    await pipeline.processDue([item], notify);
+    expect(notices).toEqual([messages.delivered("Title")]);
+    expect(queue.items()).toEqual([]);
+  });
+
+  it("a non-429 failure at the end of the window still gives up as before (S2)", async () => {
+    const item = downloadItem({ attempts: 4, nextAttemptAt: 30 * MIN });
+    const { pipeline, notify, notices, queue } = setup(
+      { download: vi.fn().mockRejectedValue(TIMEOUT_DOWNLOAD) },
+      { initial: [item], now: () => 30 * MIN },
+    );
+    await pipeline.processDue([item], notify);
+    expect(queue.items()).toEqual([]);
+    expect(notices).toEqual([messages.gaveUp(LINK, TIMEOUT_DOWNLOAD.message, 30)]);
+  });
+
+  it("a new link during the cooldown → NOT downloaded, enqueued as deferred with the cooldown, owner told when (S6)", async () => {
+    const waiting = downloadItem({ attempts: 5, nextAttemptAt: 2 * HOUR, deferred: true });
+    const { handle, replies, queue, deps, writes } = setup({}, { initial: [waiting], now: () => 30 * MIN });
+    await handle(LINK);
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(deps.spool.prepare).not.toHaveBeenCalled();
+    expect(replies).toEqual([messages.deferredNew(90 * MIN, 24)]);
+    expect(queue.items()).toEqual([
+      waiting,
+      {
+        id: "req-1",
+        url: LINK,
+        stage: "download",
+        attempts: 0,
+        firstQueuedAt: 30 * MIN,
+        nextAttemptAt: 2 * HOUR,
+        lastError: messages.rateLimitedReason,
+        deferred: true,
+      },
+    ]);
+    expect(writes.at(-1)?.items).toHaveLength(2);
+  });
+
+  it("if deferring during the cooldown cannot be persisted, the link is tried at once as usual", async () => {
+    const { handle, replies, logger, deps } = setup({
+      queue: {
+        enqueue: vi.fn().mockRejectedValue(new Error("ENOSPC")),
+        promoteToUpload: vi.fn(),
+        recordFailure: vi.fn(),
+        remove: vi.fn(),
+        cooldownUntil: vi.fn(() => 2 * HOUR),
+      },
+    });
+    await handle(LINK);
+    expect(logger.error).toHaveBeenCalledWith("could not defer during the cooldown; trying now", expect.anything());
+    expect(deps.download).toHaveBeenCalledOnce();
+    expect(replies).toEqual([messages.ack, messages.delivered("Title")]);
+  });
+
+  it("a batch of due deferred items stops hitting AO3 once one gets another 429: the rest wait 2 h, silently", async () => {
+    const first = downloadItem({ id: "q-1", attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const second = downloadItem({ id: "q-2", attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [first, second], now: () => 150 * MIN },
+    );
+    await pipeline.processDue([first, second], notify);
+    expect(deps.download).toHaveBeenCalledOnce();
+    expect(notices).toEqual([]);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({ id: "q-1", deferred: true, attempts: 6, nextAttemptAt: 150 * MIN + 2 * HOUR }),
+      expect.objectContaining({
+        id: "q-2",
+        deferred: true,
+        attempts: 6,
+        nextAttemptAt: 150 * MIN + 2 * HOUR,
+        lastError: TRANSIENT_DOWNLOAD.message,
+      }),
+    ]);
+  });
+
+  it("a link deferred while a deferred retry is in flight is not downloaded if that retry gets another 429", async () => {
+    let now = 150 * MIN;
+    const inFlight = downloadItem({ attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    let release: () => void = () => {};
+    const download = vi.fn(
+      () =>
+        new Promise<DownloadResult>((_, reject) => {
+          release = () => reject(TRANSIENT_DOWNLOAD);
+        }),
+    );
+    const { pipeline, handle, notify, queue } = setup({ download }, { initial: [inFlight], now: () => now });
+    const batch = pipeline.processDue([inFlight], notify);
+    await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+    await handle(LINK); // AO3 cooling down: deferred to the in-flight item's (past) time
+    release();
+    await batch;
+    now = 151 * MIN;
+    const newLink = queue.items().find((i) => i.id === "req-1")!;
+    await pipeline.processDue([newLink], notify);
+    expect(download).toHaveBeenCalledOnce();
+    expect(queue.items().find((i) => i.id === "req-1")).toMatchObject({
+      deferred: true,
+      nextAttemptAt: 151 * MIN + 2 * HOUR,
+    });
+  });
+
+  it("after a 429, a deferred item that becomes due LATER is tried again (the 429 is older than its turn)", async () => {
+    let now = 150 * MIN;
+    const first = downloadItem({ id: "q-1", attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const later = downloadItem({ id: "q-2", attempts: 5, nextAttemptAt: 200 * MIN, deferred: true });
+    const { pipeline, notify, deps } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [first, later], now: () => now },
+    );
+    await pipeline.processDue([first], notify);
+    now = 200 * MIN;
+    await pipeline.processDue([later], notify);
+    expect(deps.download).toHaveBeenCalledTimes(2);
+  });
+
+  it("without deferred items, a new link is downloaded as usual even if others are queued", async () => {
+    const waiting = downloadItem({ attempts: 1, nextAttemptAt: 3 * MIN });
+    const { handle, replies, deps } = setup({}, { initial: [waiting], now: () => 2 * MIN });
+    await handle(LINK);
+    expect(deps.download).toHaveBeenCalledOnce();
+    expect(replies).toEqual([messages.ack, messages.delivered("Title")]);
+  });
+});
+
+describe("deferral messages (S5, S6)", () => {
+  it("say FanFicFare is having trouble, when it will be retried and for how long", () => {
+    expect(messages.deferred("Title", 2 * HOUR, 24)).toBe(
+      "FanFicFare is having trouble with AO3 right now (it keeps getting “429 Too Many Requests”), " +
+        "so I saved “Title” and will try again in about 2 hours. " +
+        "I'll keep trying for up to 24 hours from your first request and tell you how it goes.",
+    );
+    expect(messages.deferredNew(90 * MIN, 24)).toBe(
+      "FanFicFare is having trouble with AO3 right now (it keeps getting “429 Too Many Requests”), " +
+        "so I saved your request without downloading it and will try again in about 90 minutes. " +
+        "I'll keep trying for up to 24 hours and tell you how it goes.",
+    );
+    expect(messages.gaveUpDeferred("Title", "HTTP Error 429", 24)).toBe(
+      "I gave up on “Title”: AO3 kept rate-limiting FanFicFare for 24 hours. Last error: HTTP Error 429. " +
+        "Share the link again to try once more.",
+    );
+  });
+
+  it("round the wait: minutes up to 90, hours past that, never 0", () => {
+    expect(messages.deferredNew(30_000, 24)).toContain("in about 1 minute.");
+    expect(messages.deferredNew(45 * MIN, 24)).toContain("in about 45 minutes.");
+    expect(messages.deferredNew(119 * MIN, 24)).toContain("in about 2 hours.");
+    expect(messages.deferredNew(5 * HOUR, 24)).toContain("in about 5 hours.");
+  });
+});
 
 describe("createBot — wiring", () => {
   function botWith(overrides: Partial<PipelineDeps>) {

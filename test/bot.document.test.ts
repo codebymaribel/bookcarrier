@@ -25,6 +25,8 @@ const config: ResolvedConfig = {
   spoolDir: "/q/spool",
   giveUpAfterMs: 30 * 60_000,
   retryBackoffMinutes: [1, 2, 4, 8, 15],
+  deferredRetryMs: 7_200_000,
+  deferredGiveUpAfterMs: 86_400_000,
   documentFolders: new Map([
     ["epub", BOOKS],
     ["mobi", BOOKS],

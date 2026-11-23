@@ -56,6 +56,8 @@ export async function createDaemon(config: ResolvedConfig, options: DaemonOption
     initial: state.items,
     backoffMs: config.retryBackoffMinutes.map((m) => m * 60_000),
     giveUpAfterMs: config.giveUpAfterMs,
+    deferredRetryMs: config.deferredRetryMs,
+    deferredGiveUpAfterMs: config.deferredGiveUpAfterMs,
     onChange: () => scheduler?.reschedule(),
   });
 

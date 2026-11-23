@@ -20,7 +20,7 @@ phone ──send file──▶ Telegram bot ──▶ Bookcarrier ──getFile�
 - Accepts a document sent to the bot as a file (EPUB, MOBI or PDF by default, up to 20 MB) and copies it to its folder on the Kindle (`/mnt/us/documents/books/` by default, not the fics' folder). If a file with that name is already there, it asks whether to replace it.
 - Copies it to the Kindle with `scp`.
 - Tells you, in the chat, whether it was delivered or exactly what failed.
-- If the failure is transient (AO3 down or rate-limiting, the Kindle's Wi-Fi asleep), it **keeps the request in a persistent queue and retries it on its own** for up to 30 minutes (see [Retry queue](#retry-queue)). Documents are **not** retried: if the Kindle is unreachable, you send the file again.
+- If the failure is transient (AO3 down or rate-limiting, the Kindle's Wi-Fi asleep), it **keeps the request in a persistent queue and retries it on its own** for up to 30 minutes; if AO3 is still rate-limiting (`429`) by then, it keeps the request and tries again every 2 hours for up to 24 hours (see [Retry queue](#retry-queue)). Documents are **not** retried: if the Kindle is unreachable, you send the file again.
 
 - Can run as a macOS LaunchAgent: it starts at login and comes back on its own if it crashes (see [Run as a LaunchAgent](#4-run-as-a-launchagent)).
 - Has a control panel: `bookcarrierctl` in the terminal and a menu bar item (SwiftBar) to start, stop and check the daemon (see [Control panel](#control-panel)).
@@ -79,6 +79,8 @@ Then edit it:
 | `spoolDir`             |          | `~/.bookcarrier/spool`                                                                                          | Where downloaded EPUBs wait for delivery. Never the system temp folder. `~` is expanded.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `giveUpAfterMs`        |          | `1800000`                                                                                                       | Give up on a queued request this long after it was first enqueued (30 min).                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `retryBackoffMinutes`  |          | `[1, 2, 4, 8, 15]`                                                                                              | Wait before each retry, in minutes. A non-empty list of positive integers.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `deferredRetryMs`      |          | `7200000`                                                                                                       | When AO3 keeps answering `429` past `giveUpAfterMs`, the request is kept and retried this often (2 h). See [Retry queue](#retry-queue).                                                                                                                                                                                                                                                                                                                                     |
+| `deferredGiveUpAfterMs` |          | `86400000`                                                                                                      | A request deferred by AO3's rate limit is abandoned once its next retry would land later than this after it was first enqueued (24 h).                                                                                                                                                                                                                                                                                                                                      |
 
 If a required field is missing or has the wrong type, the daemon does not start and the log says which field is wrong.
 
@@ -218,6 +220,9 @@ Share (or paste) an AO3 work link to the bot, or send it a document as a file. I
 | A link, but the Kindle is off or asleep                                         | The fic was downloaded but could not be sent; it will keep retrying for up to 30 minutes.  |
 | (later) a queued request gets through                                           | `Delivered “Title” to your Kindle.`                                                        |
 | (later) 30 minutes pass without success                                         | It gave up, with the last error. Share the link again to try once more.                    |
+| (later) 30 minutes pass and AO3 still answers `429`                             | FanFicFare is having trouble with AO3; it saved the request and will try again in about 2 hours, for up to 24 hours. |
+| A link while a request is waiting on AO3's `429`                                | It saves it without downloading (AO3 is not hit) and says when it will try.                |
+| (later) 24 hours pass and AO3 still answers `429`                               | It gave up because AO3 kept rate-limiting FanFicFare, with the last error.                 |
 | A link, but the SSH key or `scp` is misconfigured                               | A configuration error naming the problem (missing key, open permissions, `scp` not found). |
 
 If a message contains several AO3 links, only the first one is used.
@@ -249,12 +254,24 @@ Every failure is classified as **transient** or **permanent**:
 A queued request remembers its **stage**. If the download failed, the retry downloads again; if only the copy to the Kindle failed, the EPUB is already in the spool and the retry only runs `scp` — AO3 is not hit again.
 
 - **Backoff:** retries happen 1, 2, 4, 8 and 15 minutes apart (cumulative 1, 3, 7, 15, 30).
-- **Give up:** 30 minutes after it was first enqueued, the request is abandoned and its EPUB deleted from the spool.
+- **Give up:** 30 minutes after it was first enqueued, the request is abandoned and its EPUB deleted from the spool — except when AO3 is still rate-limiting (`429`), see [below](#when-ao3-keeps-rate-limiting-429).
 - **Notifications:** one message when it is enqueued, one when it is delivered (with the title), one when it is given up (with the last error). Failed attempts in between are silent.
 - **Persistence:** the queue lives in `~/.bookcarrier/queue.json` (written atomically) and the EPUBs in `~/.bookcarrier/spool/`. After a restart the daemon restores the queue, reschedules the retries and deletes spool files no queued item refers to. If the queue file is unreadable, it is kept aside as `queue.json.corrupt-<timestamp>`, the daemon starts with an empty queue and tells you.
 - **No idle work:** with an empty queue there is no timer at all; otherwise a single timer points at the next due retry.
 
 The window and the ladder are configurable (`giveUpAfterMs`, `retryBackoffMinutes`).
+
+### When AO3 keeps rate-limiting (`429`)
+
+AO3 can answer `429 Too Many Requests` for hours. A request whose 30-minute window runs out while the last error is still a `429` is **not** abandoned:
+
+- It is kept as **deferred** (in the queue file, so it survives a restart) and retried **every 2 hours**.
+- You get one message saying FanFicFare is having trouble with AO3 and when it will try again. Failed deferred retries are silent; a delivery is announced as usual.
+- It is abandoned (and you are told, with the last error) once its next retry would land more than **24 hours** after it was first enqueued.
+- While any request is deferred, AO3 is considered to be **cooling down**: a new link is not downloaded, it is saved as deferred and tried together with the earliest deferred request. This avoids prolonging the rate limit. Likewise, once a deferred retry gets another `429`, the other deferred requests due at that moment wait another 2 hours without hitting AO3.
+- Only rate-limit failures are deferred. Any other failure (AO3 `403`/`5xx`, a timeout, the Kindle asleep) is still abandoned at 30 minutes. A deferred request that downloads but then cannot reach the Kindle keeps the 2-hour cadence.
+
+Both limits are configurable (`deferredRetryMs`, `deferredGiveUpAfterMs`).
 
 ## How it works
 
@@ -286,7 +303,7 @@ src/
   index.ts        entrypoint: loads the config, checks binaries, starts long polling
   daemon.ts       startup: restores the queue, reconciles the spool, arms the retry timer
   bot.ts          owner filter + the request flow (orchestration)
-  errors.ts       transient vs permanent failure classification
+  errors.ts       transient vs permanent failure classification, AO3 rate-limit (429) detection
   binaries.ts     startup check that fanficfare, scp and ssh are on the PATH
   queue/          retry queue: state file, backoff, spool, single timer
   messages.ts     every text sent to the owner, and the error → message mapping
@@ -328,7 +345,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 | #   | Feature                                               | State        |
 | --- | ----------------------------------------------------- | ------------ |
 | 1   | Send an AO3 fic from a link                           | ✅ Done      |
-| 2   | Retry queue + start at login with launchd             | ✅ Done      |
+| 2   | Retry queue + start at login with launchd (+ deferral on AO3 `429`) | ✅ Done      |
 | 3   | Send a document as a file (EPUB, MOBI, PDF)           | ✅ Done      |
 | 4   | Control panel: `bookcarrierctl` + menu bar (SwiftBar) | ✅ Done      |
 | 5   | “Follow” button and chapter tracking                  | Planned      |
@@ -337,7 +354,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 
 ## Known limitations
 
-- Retries stop 30 minutes after the first failure: a Kindle that stays off longer than that gets the request abandoned, and the link has to be shared again (one tap from the phone). The window is configurable (`giveUpAfterMs`).
+- Retries stop 30 minutes after the first failure: a Kindle that stays off longer than that gets the request abandoned, and the link has to be shared again (one tap from the phone). The window is configurable (`giveUpAfterMs`). Only AO3's `429` rate limit gets the longer, 24-hour deferral.
 - A request that is still on its first attempt when the daemon stops is lost; only requests already in the queue survive a restart.
 - Titles with accents lose them in the file name and in the confirmation message (`Corazón` → `Coraz_n`), because FanFicFare sanitizes file names.
 - Only individual AO3 works are supported (no series or collections).

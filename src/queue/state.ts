@@ -24,6 +24,11 @@ export type QueueItem = {
   nextAttemptAt: number;
   /** Last error, for the give-up message (R6.4). */
   lastError: string;
+  /**
+   * Set once AO3's rate limit outlasted the short retry window: the item is then retried every few
+   * hours instead of along the backoff ladder (rate-limit deferral, S1). Absent on ordinary items.
+   */
+  deferred?: boolean;
 };
 
 /** The whole persisted file. `version` exists so a later format change can recognize old files. */
@@ -65,7 +70,8 @@ function isQueueItem(value: unknown): value is QueueItem {
     isFiniteNumber(value["attempts"]) &&
     isFiniteNumber(value["firstQueuedAt"]) &&
     isFiniteNumber(value["nextAttemptAt"]) &&
-    typeof value["lastError"] === "string"
+    typeof value["lastError"] === "string" &&
+    (value["deferred"] === undefined || typeof value["deferred"] === "boolean")
   );
 }
 
