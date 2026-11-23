@@ -126,6 +126,12 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
     timeoutMs: config.uploadTimeoutMs,
   };
 
+  /**
+   * The last AO3 rate limit seen on a retry (in memory only). A deferred download that became due
+   * at or before it is not sent to AO3: the limit is still on, so it waits another deferral (S6).
+   */
+  let lastRateLimit: { at: number; error: string } | undefined;
+
   let chain: Promise<unknown> = Promise.resolve();
   /** Runs `work` after every earlier piece of work has finished. */
   const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
@@ -227,7 +233,16 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
   /** One retry of one item; every outcome ends with the item updated or removed. */
   const retry = async (item: QueueItem, notify: Send): Promise<void> => {
     let current = item;
+    const cooling =
+      lastRateLimit !== undefined &&
+      current.deferred === true &&
+      current.stage === "download" &&
+      current.nextAttemptAt <= lastRateLimit.at;
     try {
+      if (cooling && lastRateLimit !== undefined) {
+        logger.info("AO3 still rate-limiting; not retrying this deferred download now", { id: current.id });
+        throw new RateLimitStillOn(lastRateLimit.error);
+      }
       if (current.stage === "download") {
         const result = await download(current.id, current.url);
         current = await queue.promoteToUpload(current.id, result.filePath, result.title);
@@ -240,16 +255,18 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
       await safely(notify, messages.delivered(current.title ?? current.url));
     } catch (err) {
       logger.warn("retry failed", { id: current.id, error: err, stderr: stderrOf(err) });
-      if (classifyFailure(err) === "permanent") {
+      if (!(err instanceof RateLimitStillOn) && classifyFailure(err) === "permanent") {
         await queue.remove(current.id);
         await discard(current.id);
         await safely(notify, failureMessage(err, current.title));
         return;
       }
       const name = current.title ?? current.url;
-      const outcome = await queue.recordFailure(current.id, errorText(err), {
-        rateLimited: isRateLimited(err),
-      });
+      const rateLimited = err instanceof RateLimitStillOn || isRateLimited(err);
+      if (rateLimited && !(err instanceof RateLimitStillOn)) {
+        lastRateLimit = { at: now(), error: errorText(err) };
+      }
+      const outcome = await queue.recordFailure(current.id, errorText(err), { rateLimited });
       if (outcome.deferred) {
         // S1, S5: the window ran out under AO3's rate limit; kept (with its spool) for later.
         logger.warn("deferred by the AO3 rate limit", {
@@ -284,6 +301,9 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
 
   return { handle, processDue };
 }
+
+/** A deferred download skipped because AO3 answered 429 since it became due; carries that error. */
+class RateLimitStillOn extends Error {}
 
 /** A {@link Send} that writes to the owner's private chat: retries have no message to reply to. */
 export function notifyOwner(bot: Bot, ownerId: number): Send {

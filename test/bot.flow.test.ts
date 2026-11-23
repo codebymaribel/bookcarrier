@@ -659,6 +659,68 @@ describe("rate-limit deferral (S1–S6)", () => {
     expect(replies).toEqual([messages.ack, messages.delivered("Title")]);
   });
 
+  it("a batch of due deferred items stops hitting AO3 once one gets another 429: the rest wait 2 h, silently", async () => {
+    const first = downloadItem({ id: "q-1", attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const second = downloadItem({ id: "q-2", attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const { pipeline, notify, notices, queue, deps } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [first, second], now: () => 150 * MIN },
+    );
+    await pipeline.processDue([first, second], notify);
+    expect(deps.download).toHaveBeenCalledOnce();
+    expect(notices).toEqual([]);
+    expect(queue.items()).toEqual([
+      expect.objectContaining({ id: "q-1", deferred: true, attempts: 6, nextAttemptAt: 150 * MIN + 2 * HOUR }),
+      expect.objectContaining({
+        id: "q-2",
+        deferred: true,
+        attempts: 6,
+        nextAttemptAt: 150 * MIN + 2 * HOUR,
+        lastError: TRANSIENT_DOWNLOAD.message,
+      }),
+    ]);
+  });
+
+  it("a link deferred while a deferred retry is in flight is not downloaded if that retry gets another 429", async () => {
+    let now = 150 * MIN;
+    const inFlight = downloadItem({ attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    let release: () => void = () => {};
+    const download = vi.fn(
+      () =>
+        new Promise<DownloadResult>((_, reject) => {
+          release = () => reject(TRANSIENT_DOWNLOAD);
+        }),
+    );
+    const { pipeline, handle, notify, queue } = setup({ download }, { initial: [inFlight], now: () => now });
+    const batch = pipeline.processDue([inFlight], notify);
+    await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+    await handle(LINK); // AO3 cooling down: deferred to the in-flight item's (past) time
+    release();
+    await batch;
+    now = 151 * MIN;
+    const newLink = queue.items().find((i) => i.id === "req-1")!;
+    await pipeline.processDue([newLink], notify);
+    expect(download).toHaveBeenCalledOnce();
+    expect(queue.items().find((i) => i.id === "req-1")).toMatchObject({
+      deferred: true,
+      nextAttemptAt: 151 * MIN + 2 * HOUR,
+    });
+  });
+
+  it("after a 429, a deferred item that becomes due LATER is tried again (the 429 is older than its turn)", async () => {
+    let now = 150 * MIN;
+    const first = downloadItem({ id: "q-1", attempts: 5, nextAttemptAt: 150 * MIN, deferred: true });
+    const later = downloadItem({ id: "q-2", attempts: 5, nextAttemptAt: 200 * MIN, deferred: true });
+    const { pipeline, notify, deps } = setup(
+      { download: vi.fn().mockRejectedValue(TRANSIENT_DOWNLOAD) },
+      { initial: [first, later], now: () => now },
+    );
+    await pipeline.processDue([first], notify);
+    now = 200 * MIN;
+    await pipeline.processDue([later], notify);
+    expect(deps.download).toHaveBeenCalledTimes(2);
+  });
+
   it("without deferred items, a new link is downloaded as usual even if others are queued", async () => {
     const waiting = downloadItem({ attempts: 1, nextAttemptAt: 3 * MIN });
     const { handle, replies, deps } = setup({}, { initial: [waiting], now: () => 2 * MIN });

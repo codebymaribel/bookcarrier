@@ -268,7 +268,7 @@ AO3 can answer `429 Too Many Requests` for hours. A request whose 30-minute wind
 - It is kept as **deferred** (in the queue file, so it survives a restart) and retried **every 2 hours**.
 - You get one message saying FanFicFare is having trouble with AO3 and when it will try again. Failed deferred retries are silent; a delivery is announced as usual.
 - It is abandoned (and you are told, with the last error) once its next retry would land more than **24 hours** after it was first enqueued.
-- While any request is deferred, AO3 is considered to be **cooling down**: a new link is not downloaded, it is saved as deferred and tried together with the earliest deferred request. This avoids prolonging the rate limit.
+- While any request is deferred, AO3 is considered to be **cooling down**: a new link is not downloaded, it is saved as deferred and tried together with the earliest deferred request. This avoids prolonging the rate limit. Likewise, once a deferred retry gets another `429`, the other deferred requests due at that moment wait another 2 hours without hitting AO3.
 - Only rate-limit failures are deferred. Any other failure (AO3 `403`/`5xx`, a timeout, the Kindle asleep) is still abandoned at 30 minutes. A deferred request that downloads but then cannot reach the Kindle keeps the 2-hour cadence.
 
 Both limits are configurable (`deferredRetryMs`, `deferredGiveUpAfterMs`).

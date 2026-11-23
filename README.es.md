@@ -272,7 +272,7 @@ AO3 puede responder `429 Too Many Requests` durante horas. Un pedido cuya ventan
 - Queda **diferido** (en el archivo de la cola, así que sobrevive a un reinicio) y se reintenta **cada 2 horas**.
 - Recibís un mensaje diciendo que FanFicFare tiene problemas con AO3 y cuándo lo va a volver a intentar. Los reintentos diferidos fallidos son silenciosos; una entrega se avisa como siempre.
 - Se abandona (y te avisa, con el último error) cuando su próximo reintento caería más de **24 horas** después de haberse encolado por primera vez.
-- Mientras haya algún pedido diferido, se considera que AO3 está **en enfriamiento**: un link nuevo no se descarga, se guarda como diferido y se intenta junto con el pedido diferido más próximo. Así no se alarga el límite.
+- Mientras haya algún pedido diferido, se considera que AO3 está **en enfriamiento**: un link nuevo no se descarga, se guarda como diferido y se intenta junto con el pedido diferido más próximo. Así no se alarga el límite. Del mismo modo, si un reintento diferido recibe otro `429`, los demás pedidos diferidos que vencían en ese momento esperan otras 2 horas sin tocar AO3.
 - Solo se difieren los fallos por límite de pedidos. Cualquier otro fallo (`403`/`5xx` de AO3, un timeout, la Kindle dormida) se sigue abandonando a los 30 minutos. Un pedido diferido que se descarga pero después no llega a la Kindle mantiene la frecuencia de 2 horas.
 
 Los dos límites se configuran (`deferredRetryMs`, `deferredGiveUpAfterMs`).
