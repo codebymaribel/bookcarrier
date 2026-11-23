@@ -19,6 +19,7 @@ celular ──enviar archivo──▶ bot de Telegram ──▶ Bookcarrier ─�
 - Acepta un link a un work de AO3 compartido con el bot, incluso cuando el menú de compartir manda el título y la URL juntos (descarga el fic como EPUB con [FanFicFare](https://github.com/JimmXinu/FanFicFare), con el nombre `<id-del-work>-<título>.epub`, para que el nombre sea estable).
 - Acepta un documento enviado al bot como archivo (por defecto EPUB, MOBI o PDF, de hasta 20 MB) y lo copia a su carpeta en la Kindle (`/mnt/us/documents/books/` por defecto, no la carpeta de los fics). Si ya hay un archivo con ese nombre, pregunta si lo reemplaza.
 - Lo copia a la Kindle con `scp`.
+- En un fic de AO3 **en curso**, el mensaje de entrega trae un botón **Follow**: guarda el fic con la cantidad de capítulos entregados, para que la revisión diaria (feature 6) sepa desde qué capítulo mirar. **Unfollow** lo deja de seguir, y un fic seguido que se completa se deja de seguir solo. Esta feature no consulta AO3 por capítulos nuevos.
 - Te avisa en el chat si se entregó o qué falló exactamente.
 - Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos; si para entonces AO3 sigue limitando pedidos (`429`), guarda el pedido y lo vuelve a intentar cada 2 horas durante hasta 24 horas (ver [Cola de reintentos](#cola-de-reintentos)). Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
 
@@ -78,6 +79,7 @@ Después editalo:
 | `uploadTimeoutMs` | | `120000` | Tiempo máximo de la copia (2 min). |
 | `sshConnectTimeoutSec` | | `10` | `ConnectTimeout` de SSH. |
 | `queuePath` | | `~/.bookcarrier/queue.json` | Archivo de estado de la cola de reintentos. Un `~` inicial se expande. |
+| `followsPath` | | `~/.bookcarrier/follows.json` | Archivo de estado de los fics seguidos (guarda también los últimos 10 fics entregados que ofrecieron Follow). Un `~` inicial se expande. |
 | `spoolDir` | | `~/.bookcarrier/spool` | Dónde esperan su entrega los EPUB descargados. Nunca la carpeta temporal del sistema. El `~` se expande. |
 | `giveUpAfterMs` | | `1800000` | Se abandona un pedido en cola este tiempo después de haberse encolado por primera vez (30 min). |
 | `retryBackoffMinutes` | | `[1, 2, 4, 8, 15]` | Espera antes de cada reintento, en minutos. Una lista no vacía de enteros positivos. |
@@ -231,6 +233,22 @@ Compartí (o pegá) un link a un work de AO3 con el bot, o mandale un documento 
 
 Si un mensaje trae varios links de AO3, solo se usa el primero.
 
+Seguir un fic (solo fics de AO3 **en curso**; los documentos nunca se siguen):
+
+| Pasa esto | El bot responde |
+|---|---|
+| Se entrega un fic en curso | `Delivered “Título” to your Kindle.` con un botón **Follow**. |
+| → tocás **Follow** | `Following “Título” — 12 chapters delivered.` y el botón pasa a **Unfollow**. |
+| → tocás **Unfollow** | `OK, I'm no longer following “Título”.` y el botón desaparece. |
+| Volvés a mandar el link de un fic seguido | `Delivered “Título” to your Kindle. I updated your follow: now 14 chapters.` con el botón **Unfollow**: se actualizan solos la cantidad de capítulos y el estado guardados. |
+| Se entrega un fic que ya está completo | `Delivered “Título” to your Kindle.` **sin** botón: los fics completos no se siguen. |
+| Volvés a mandar un fic seguido y ya está completo | `Delivered “Título” to your Kindle. It's complete now, so I'm no longer following it.` Se deja de seguir solo, sin botón. |
+| → tocás un **Follow** viejo, después de que se entregaron 10 fics más (o si el fic no figura) | `I don't have that fic any more. Send me its link again to follow it.` No se guarda nada. |
+| FanFicFare no deja metadatos de capítulos utilizables | El fic se entrega igual, **sin** botón **Follow**, y queda un aviso en el log. |
+| El archivo de fics seguidos está ilegible al arrancar | `The file with your followed fics was unreadable, so I started with none followed. The old file was kept as <ruta> so it can be inspected.` (el archivo viejo queda como `follows.json.corrupt-<timestamp>`). |
+
+El botón **Follow** de un fic sigue andando para los últimos 10 fics entregados, incluso después de reiniciar el demonio. Los fics seguidos no cuentan para ese límite. Un pedido diferido por el límite de AO3 también ofrece **Follow** cuando por fin se entrega.
+
 Para un documento (EPUB, MOBI, PDF, como archivo; el texto que lo acompaña se ignora):
 
 | Vos mandás | El bot responde |
@@ -283,7 +301,8 @@ Los dos límites se configuran (`deferredRetryMs`, `deferredGiveUpAfterMs`).
 2. `extractWorkLink` encuentra la URL de AO3 dentro del texto (verificando el hostname exacto) y reconstruye la URL canónica `https://archiveofourown.org/works/<id>`.
 3. `downloadEpub` ejecuta `fanficfare` como subproceso en una carpeta vacía del spool y toma el único `.epub` que deja ahí. El propio FanFicFare nombra y sanitiza el archivo.
 4. `uploadToKindle` revisa primero la llave SSH (con el mismo criterio que usa SSH) y después ejecuta `scp`.
-5. El bot responde. Si salió bien, el EPUB se borra del spool; ante un fallo transitorio el pedido entra en la cola de reintentos; ante uno permanente se informa el error y se borra el EPUB.
+5. Junto con el EPUB, `fanficfare` escribe `<nombre>.epub.json` (`--json-meta-file`). `parseFicMeta` lee de ahí la cantidad de capítulos publicados (`numChapters`) y el estado (`Completed` / `In-Progress`); no hace ningún pedido extra a AO3. Si el JSON falta o no sirve, el fic se entrega igual pero sin botón **Follow**. Con el fic entregado, `follows.onDelivered` decide si ofrece **Follow**, actualiza un fic seguido o lo deja de seguir (`follows.json`). Un pedido diferido por el límite de AO3 lee estos metadatos cuando por fin se descarga, así que ofrece **Follow** cuando se entrega.
+6. El bot responde. Si salió bien, el EPUB se borra del spool; ante un fallo transitorio el pedido entra en la cola de reintentos; ante uno permanente se informa el error y se borra el EPUB.
 
 Para un documento:
 
@@ -315,8 +334,12 @@ src/              una carpeta por contexto (bounded context); cada una expone un
     pipeline.ts     el flujo de pedidos y reintentos (orquestación), de a una operación por vez
     ao3-link.ts     encuentra y valida el link a un work de AO3 en un mensaje
     downloader.ts   wrapper del subproceso de FanFicFare
+    fic-meta.ts     lee del archivo de metadatos de FanFicFare la cantidad de capítulos y el estado de un fic
     failure.ts      clasificación de fallos en transitorios y permanentes, detección del límite de AO3 (429)
     messages.ts     todos los textos sobre fics, y su mapeo error → mensaje
+  follows/        fics seguidos
+    follows.ts      Follow, Unfollow, los últimos 10 fics entregados y el estado de follows.json
+    messages.ts     todos los textos sobre seguir fics, y el aviso de archivo de seguidos corrupto
   documents/      documentos enviados al bot como archivo
     flow.ts         el flujo de documentos (orquestación), incluida la pregunta Replace/Cancel
     document.ts     validación de documentos y sanitización del nombre de archivo
@@ -334,6 +357,7 @@ src/              una carpeta por contexto (bounded context); cada una expone un
     ssh.ts          opciones SSH y chequeo de la llave compartidos por scp y ssh; chequeo de existencia en la Kindle
     messages.ts     el texto de problema de configuración de la Kindle
   shared/         config.ts (carga y valida ~/.bookcarrier/config.json), logger.ts,
+                  json-file.ts (lectura/escritura atómica de un JSON con versión, compartida por la cola y los fics seguidos),
                   subprocess.ts (utilidades de los wrappers de subprocesos), messages.ts (texto genérico)
 test/             tests con Vitest de bookcarrierctl, el plist de launchd y la plantilla de SwiftBar
 docs/specs/       las especificaciones (ver abajo)
@@ -365,7 +389,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | 2   | Cola de reintentos + arranque al iniciar sesión con launchd (+ diferimiento ante el `429` de AO3) | ✅ Hecha        |
 | 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)            | ✅ Hecha        |
 | 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | ✅ Hecha        |
-| 5   | Botón “Seguir” y seguimiento de capítulos                     | Planeada        |
+| 5   | Botón “Follow” y seguimiento de capítulos                     | 🚧 En curso (verificación manual pendiente) |
 | 6   | Revisión diaria de capítulos nuevos                           | Planeada        |
 | 7   | Comandos `/list`, `/drop`, `/status`                          | Planeada        |
 

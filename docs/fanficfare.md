@@ -8,8 +8,8 @@ Version checked for this document: **FanFicFare 4.63.0** (Homebrew, `brew instal
 
 | What | Where | Value |
 | --- | --- | --- |
-| Binary | `src/downloader.ts` `FANFICFARE_BIN` | `fanficfare`, found on the `PATH` |
-| Only entry point | `src/downloader.ts` `downloadEpub(url, outDir, opts)` | one subprocess per download |
+| Binary | `src/fanfic/downloader.ts` `FANFICFARE_BIN` | `fanficfare`, found on the `PATH` |
+| Only entry point | `src/fanfic/downloader.ts` `downloadEpub(url, outDir, opts)` | one subprocess per download |
 | Arguments | `downloadEpub` | `<url> -f epub --non-interactive --json-meta-file -o output_filename=${storyId}-${title}${formatext}` |
 | Working directory | `cwd` of the subprocess | `outDir`, an empty spool folder for this request |
 | Timeout | config `downloadTimeoutMs` | default `600000` (10 min), then `SIGKILL` |
@@ -17,25 +17,25 @@ Version checked for this document: **FanFicFare 4.63.0** (Homebrew, `brew instal
 
 ## Who calls it
 
-There is exactly one place that runs FanFicFare: `downloadEpub` in `src/downloader.ts`. Everything else reaches it through the pipeline in `src/bot.ts`, which receives it as the `download` dependency (`PipelineDeps.download`) so tests can replace it with a fake.
+There is exactly one place that runs FanFicFare: `downloadEpub` in `src/fanfic/downloader.ts`. Everything else reaches it through the pipeline in `src/fanfic/pipeline.ts`, which receives it as the `download` dependency (`PipelineDeps.download`) so tests can replace it with a fake.
 
 ```
 Telegram message with an AO3 link
-  └─ bot.ts  pipeline.handle()          new request
+  └─ fanfic/pipeline.ts  handle()          new request
        └─ download(id, link.canonicalUrl)
             └─ spool.prepare(id)        empty folder ~/.bookcarrier/spool/<id>/ (spoolDir)
             └─ downloadEpub(url, dir, { timeoutMs: config.downloadTimeoutMs })
 
 Retry timer (feature 2 queue, item in the "download" stage)
-  └─ bot.ts  pipeline.retry()
+  └─ fanfic/pipeline.ts  retry()
        └─ download(item.id, item.url)   same helper, same call
 ```
 
-- The URL is always the **canonical** work URL built by `src/ao3-link.ts` (`https://archiveofourown.org/works/<id>`), never the raw text the owner shared. A chapter link or a collection link is normalized to the work first.
+- The URL is always the **canonical** work URL built by `src/fanfic/ao3-link.ts` (`https://archiveofourown.org/works/<id>`), never the raw text the owner shared. A chapter link or a collection link is normalized to the work first.
 - Other modules only know FanFicFare by name:
-  - `src/binaries.ts` checks at startup that `fanficfare` (with `scp` and `ssh`) is on the `PATH`, and logs an error if not. The daemon starts anyway.
-  - `src/errors.ts` reads FanFicFare's error output to decide whether a failure is worth retrying.
-  - `src/messages.ts` has the owner-facing text for "FanFicFare could not be started".
+  - `src/app/binaries.ts` checks at startup that `fanficfare` (with `scp` and `ssh`) is on the `PATH`, and logs an error if not. The daemon starts anyway.
+  - `src/fanfic/failure.ts` reads FanFicFare's error output to decide whether a failure is worth retrying.
+  - `src/fanfic/messages.ts` has the owner-facing text for "FanFicFare could not be started".
 
 ## The command, argument by argument
 
@@ -60,18 +60,19 @@ fanficfare https://archiveofourown.org/works/<id> \
 All of this is in `downloadEpub`:
 
 - **Async, never blocking.** `child_process.spawn`, wrapped in a promise. The bot keeps handling other messages while a download runs.
-- **Working directory = `outDir`.** It is an empty folder exclusive to this request (`src/queue/spool.ts`), so FanFicFare's EPUB is the only one there. Bookcarrier does not try to predict the file name. After the run it lists the folder and takes the single `.epub`.
+- **Working directory = `outDir`.** It is an empty folder exclusive to this request (`src/retry-queue/spool.ts`), so FanFicFare's EPUB is the only one there. Bookcarrier does not try to predict the file name. After the run it lists the folder and takes the single `.epub`.
 - **Both output pipes are read.** stdout is read and thrown away. For stderr, only the last part is kept, for the logs. Reading both prevents the child from blocking on a full pipe.
 - **Timeout.** After `downloadTimeoutMs` the process gets `SIGKILL`, and the download fails with reason `timeout`.
 - **Result.** `{ filePath, title, meta? }` (`meta` is described below, `metaWarning` carries the reason when it is missing). The title comes from the file name minus the `<storyId>-` prefix and the extension. FanFicFare has already sanitized it, so accents become `_` (`Corazón` → `Coraz_n`), a known limitation listed in the README.
 
 ## Outcomes and how they are classified
 
-| What happened | Error | Classified as (`src/errors.ts`) | Effect |
+| What happened | Error | Classified as (`src/fanfic/failure.ts`) | Effect |
 | --- | --- | --- | --- |
 | `spawn` fails (`ENOENT`: not installed or not on `PATH`) | `DownloadLaunchError` | permanent | reported to the owner at once, never queued |
 | Exit code ≠ 0, stderr says the work does not exist (`StoryDoesNotExist`, `(404)`, `HTTP Error 404`) | `DownloadFailedError("exit-code")` | permanent | reported, never queued |
-| Any other exit code ≠ 0 (AO3 down, 403, **429**, network) | `DownloadFailedError("exit-code")` | transient | queued, retried with backoff (feature 2) |
+| Any other exit code ≠ 0 (AO3 down, 403, network) | `DownloadFailedError("exit-code")` | transient | queued, retried with backoff (feature 2); abandoned when the 30-minute window runs out |
+| Exit code ≠ 0 with a rate-limit message (**429**) | `DownloadFailedError("exit-code")` | transient, and rate-limited (`isRateLimited`) | queued like the row above; when the window runs out it is **deferred** instead of abandoned (see "AO3 rate limiting") |
 | Timeout | `DownloadFailedError("timeout")` | transient | queued |
 | Exit 0 but no EPUB, an empty EPUB, or more than one | `DownloadFailedError("no-file" / "multiple-files")` | permanent | reported, never queued |
 
@@ -101,15 +102,24 @@ Built-in AO3 defaults that matter for Bookcarrier (`[archiveofourown.org]` in Fa
 
 ## launchd and the `PATH`
 
-launchd gives its jobs almost no `PATH`. The LaunchAgent template (`launchd/com.codebymaribel.bookcarrier.plist`) sets `EnvironmentVariables.PATH` to include Homebrew's prefix. Without it, `fanficfare` is not found and every download fails with `DownloadLaunchError`. The startup check in `src/binaries.ts` logs this case.
+launchd gives its jobs almost no `PATH`. The LaunchAgent template (`launchd/com.codebymaribel.bookcarrier.plist`) sets `EnvironmentVariables.PATH` to include Homebrew's prefix. Without it, `fanficfare` is not found and every download fails with `DownloadLaunchError`. The startup check in `src/app/binaries.ts` logs this case.
 
 ## AO3 rate limiting (429)
 
-AO3 answers `429 Too Many Requests` when it is hit too often. FanFicFare then exits with an error. Bookcarrier classifies that as transient and retries later with backoff (feature 2). It never retries immediately. Bookcarrier only runs FanFicFare when the owner sends a link or the queue retries one, so the request rate stays low. See [docs/specs/05-follow/research.md](specs/05-follow/research.md) §2 and §4.
+AO3 answers `429 Too Many Requests` when it is hit too often, and FanFicFare then exits with an error. `classifyFailure` (`src/fanfic/failure.ts`) treats it as transient like any non-zero exit, so it is retried with the backoff ladder. `isRateLimited` (same file) additionally recognizes it in stderr or in the error message: `Too Many Requests`, `HTTP Error 429`, `429 Client Error` or `(429)`. A bare "429" inside a work id never matches. Only a download that exited with a non-zero code (not a timeout, not an upload) can be rate-limited.
+
+What changes for a rate-limited download (feature 2, R8; `src/retry-queue/queue.ts`):
+
+- When the 30-minute window (`giveUpAfterMs`) runs out and the last failure is still a rate limit, the item is **deferred** instead of abandoned. It keeps its spool and is retried every `deferredRetryMs` (default 2 h, `7200000`).
+- It is abandoned when its next attempt would land later than `deferredGiveUpAfterMs` (default 24 h, `86400000`) after it was first enqueued.
+- While any request is deferred, a **new link is not downloaded**: it is enqueued as deferred, without a download, and tried with the earliest deferred item. When a deferred retry gets another 429, the other deferred downloads due at that moment wait another delay without touching AO3.
+- Any other failure (timeout, 403/5xx, Kindle asleep) is still abandoned at 30 minutes.
+
+Bookcarrier only runs FanFicFare when the owner sends a link or the queue retries one, so the request rate stays low. See [docs/specs/02-retry-queue/requirements.md](specs/02-retry-queue/requirements.md) (R8) and [docs/specs/05-follow/research.md](specs/05-follow/research.md) §2 and §4. A deferred download that finally succeeds reads its metadata like any other, so Follow is offered when it is delivered.
 
 ## The metadata file
 
-With `--json-meta-file`, FanFicFare writes `<output_filename>.json` in the same folder as the EPUB, for example `12345678-My_Fic_Title.epub.json`. After finding the EPUB, `downloadEpub` reads `<filePath>.json` (when it knows the work id) and passes it to `parseFicMeta` (`src/fic-meta.ts`). Two fields matter:
+With `--json-meta-file`, FanFicFare writes `<output_filename>.json` (`<storyId>-<title>.epub.json`) in the same folder as the EPUB, for example `12345678-My_Fic_Title.epub.json`. After finding the EPUB, `downloadEpub` reads `<filePath>.json` (when it knows the work id) and passes it to `parseFicMeta` (`src/fanfic/fic-meta.ts`). Two fields matter:
 
 - `numChapters`: the published chapter count. FanFicFare writes it as a **string grouped with commas** (`"12"`, `"1,204"`), so the parser accepts a number or a string, strips the separators, and requires a positive integer.
 - `status`: `Completed` or `In-Progress`. Anything else is treated as unknown.
@@ -120,7 +130,9 @@ The file is never fatal. If it is missing, unreadable, invalid JSON or has no va
 
 ## Testing
 
-Tests never run the real `fanficfare` and never touch AO3:
+Tests never run the real `fanficfare` and never touch AO3. They sit next to the code they test:
 
-- the pipeline tests inject a fake `download` through `PipelineDeps`;
-- the downloader's own tests check the arguments, the spool-folder handling, the timeout and the error cases with a stand-in process.
+- `src/fanfic/downloader.test.ts`: the arguments, the spool-folder handling, the timeout, the error cases and the metadata file, with a stand-in process;
+- `src/fanfic/failure.test.ts`: transient vs permanent and the rate-limit detection;
+- `src/fanfic/fic-meta.test.ts`: `parseFicMeta` (the comma-grouped `numChapters`, the status);
+- `src/fanfic/pipeline.test.ts`: the pipeline injects a fake `download` through its dependencies.

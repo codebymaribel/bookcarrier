@@ -82,7 +82,7 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: a corrupt `follows.json` → the daemon starts, the error log names the backup path, and the state is empty (criterion 9).
   - Test: a valid file → the followed fics are available to the first tap after startup.
 
-- [ ] **T11 — Documentation.** No unit test.
+- [x] **T11 — Documentation.** No unit test.
   - `config.example.json`: `followsPath` with its default (R7.3).
   - `README.md` and `README.es.md`: config table row for `followsPath`; "Using it" rows (Follow, Unfollow, re-sending a followed fic, a complete fic has no button, auto-unfollow when completed, old Follow button → send it again); a "How it works" step for the chapter metadata; roadmap renumbered (5 = Follow, 6 = daily check, 7 = commands).
   - `docs/fanficfare.md`: update the file paths to the DDD layout (`src/fanfic/downloader.ts`, etc.); move `--json-meta-file` from "Planned change" into the command and arguments sections; replace its 429 description with the deferral behavior (#7: after the retry ladder a 429'd item is deferred for hours, new links are deferred while any item is deferred).
