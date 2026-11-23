@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedConfig } from "../shared/index.js";
 import { createDaemon } from "./daemon.js";
 import { messages } from "../fanfic/index.js";
-import { messages as queueMessages } from "../retry-queue/index.js";
-import type { QueueItem } from "../retry-queue/index.js";
+import { messages as queueMessages, type QueueItem } from "../retry-queue/index.js";
 
 const MIN = 60_000;
 let root: string;

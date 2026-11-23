@@ -1,14 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ResolvedConfig } from "../shared/index.js";
+import { type Logger, logger as defaultLogger, type ResolvedConfig } from "../shared/index.js";
 import { type DocumentInfo, validateDocument } from "./document.js";
-import { logger as defaultLogger, type Logger } from "../shared/index.js";
 import { documentFailureMessage, messages } from "./messages.js";
 import { createPendingStore, type PendingOverwrite, type PendingStore } from "./pending.js";
-import { existsOnKindle, type SshTarget, UploadFailedError } from "../kindle/index.js";
+import { existsOnKindle, type SshTarget, UploadFailedError, uploadToKindle } from "../kindle/index.js";
 import { downloadTelegramFile, type TelegramFileDeps } from "./telegram-file.js";
-import { uploadToKindle } from "../kindle/index.js";
 
 /** How long an overwrite question stays answerable (R5.8). Not config: nobody asked for it. */
 export const CONFIRMATION_TTL_MS = 10 * 60_000;

@@ -2,16 +2,14 @@ import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
 import { createBot } from "../telegram/index.js";
 import { createPipeline, type PipelineDeps, type RequestConfig } from "./pipeline.js";
-import type { ResolvedConfig } from "../shared/index.js";
+import type { Logger, ResolvedConfig } from "../shared/index.js";
 import {
   DownloadFailedError,
   DownloadLaunchError,
   type DownloadResult,
 } from "./downloader.js";
-import type { Logger } from "../shared/index.js";
 import { messages } from "./messages.js";
-import { createQueue, type Queue } from "../retry-queue/index.js";
-import type { QueueItem, QueueState } from "../retry-queue/index.js";
+import { createQueue, type Queue, type QueueItem, type QueueState } from "../retry-queue/index.js";
 import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
 
 const MIN = 60_000;

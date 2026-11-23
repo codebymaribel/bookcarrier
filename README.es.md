@@ -323,7 +323,12 @@ src/              una carpeta por contexto (bounded context); cada una expone un
     telegram-file.ts descarga un archivo enviado al bot (getFile + fetch) sin filtrar el token
     pending.ts      preguntas Replace/Cancel pendientes, en memoria, con vencimiento a los 10 minutos
     messages.ts     todos los textos sobre documentos, y su mapeo error → mensaje
-  retry-queue/    cola de reintentos: archivo de estado, backoff y diferido, spool, timer único
+  retry-queue/    cola de reintentos
+    queue.ts        política de backoff, ventana de reintentos y diferido por el límite de AO3
+    state.ts        el archivo persistido de la cola (escrituras atómicas, respaldo si está corrupto)
+    spool.ts        un directorio por pedido en cola, con su EPUB
+    scheduler.ts    el timer único que despierta para el próximo pedido pendiente
+    messages.ts     el aviso de archivo de cola corrupto
   kindle/         entrega a la Kindle
     uploader.ts     wrapper del subproceso de scp
     ssh.ts          opciones SSH y chequeo de la llave compartidos por scp y ssh; chequeo de existencia en la Kindle

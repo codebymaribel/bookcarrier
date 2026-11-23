@@ -1,11 +1,13 @@
-import { messages as kindle } from "../kindle/index.js";
-import { UploadConfigError, UploadFailedError } from "../kindle/index.js";
+import { messages as kindle, UploadConfigError, UploadFailedError } from "../kindle/index.js";
 import { messages as shared } from "../shared/index.js";
 import { DownloadFailedError, DownloadLaunchError } from "./downloader.js";
 
 /**
  * Every text the bot sends the owner about fics (AO3 links), in one place. Plain text on purpose (no
  * parse_mode), so a title with `_`, `*` or `[` can never break the message. Never contains a stack trace.
+ *
+ * `uploadConfig` and `unexpected` are owned by the kindle and shared contexts and only re-exposed
+ * here, so every message this context sends is reachable from one object: change their wording there.
  */
 export const messages = {
   /** R2.1 */

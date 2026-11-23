@@ -24,3 +24,4 @@ Branch `refactor/ddd-layout` from `main`.
 - L2: decisions (ask): strategic DDD, folder per context; tests next to code; move + extract pipeline from bot.ts; branch from main ("ya esta actualizada").
 - L3: messages.ts decision (ask): "Partirlo por contexto (Recomendado, DDD real)" — each context owns its messages and error→text mapping; README one-file promise updated.
 - L4: slice boundary: T1+T2 (~400 lines) form one review slice; T3+T4 the second. Each commit leaves typecheck clean and 536/536 tests passing.
+- L5: native review of 3906630..aa0eb10 approved (readability, reliability); advisory findings applied: merged duplicate index.js imports, documented re-exposed texts, listed retry-queue modules in READMEs, pinned literal uploadConfig/unexpected texts (R2-001..R2-007, R3-001). R2-008 (odd/tasks doc) kept: repo convention.

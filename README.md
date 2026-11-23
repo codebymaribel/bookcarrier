@@ -319,7 +319,12 @@ src/              one folder per bounded context; each exposes an index.ts, the 
     telegram-file.ts downloads a file sent to the bot (getFile + fetch), without leaking the token
     pending.ts      in-memory pending Replace/Cancel questions, with a 10-minute expiry
     messages.ts     every text about documents, and their error → message mapping
-  retry-queue/    retry queue: state file, backoff and deferral, spool, single timer
+  retry-queue/    retry queue
+    queue.ts        backoff, give-up window and AO3 rate-limit deferral policy
+    state.ts        the persisted queue file (atomic writes, corrupt-file backup)
+    spool.ts        one directory per queued request, holding its EPUB
+    scheduler.ts    the single timer that wakes up for the next due item
+    messages.ts     the corrupt-queue-file notice
   kindle/         delivery to the Kindle
     uploader.ts     scp subprocess wrapper
     ssh.ts          SSH options and key check shared by scp and ssh; existence check on the Kindle

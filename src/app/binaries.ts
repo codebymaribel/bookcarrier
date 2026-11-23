@@ -3,8 +3,7 @@ import { access, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { FANFICFARE_BIN } from "../fanfic/index.js";
 import type { Logger } from "../shared/index.js";
-import { SSH_BIN } from "../kindle/index.js";
-import { SCP_BIN } from "../kindle/index.js";
+import { SCP_BIN, SSH_BIN } from "../kindle/index.js";
 
 /**
  * External binaries the daemon spawns; all must be resolvable on the PATH (R7.7). `ssh` runs the

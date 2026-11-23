@@ -1,9 +1,6 @@
-import type { ResolvedConfig } from "../shared/index.js";
-import type { Logger } from "../shared/index.js";
+import type { Logger, ResolvedConfig } from "../shared/index.js";
 import { failureMessage, messages } from "./messages.js";
-import type { Queue } from "../retry-queue/index.js";
-import type { Spool } from "../retry-queue/index.js";
-import type { QueueItem } from "../retry-queue/index.js";
+import type { Queue, QueueItem, Spool } from "../retry-queue/index.js";
 import { UploadFailedError, type UploadOptions, type uploadToKindle } from "../kindle/index.js";
 import { extractWorkLink } from "./ao3-link.js";
 import { DownloadFailedError, type DownloadResult, type downloadEpub } from "./downloader.js";
