@@ -4,6 +4,7 @@ import { createBot } from "../telegram/index.js";
 import { createPipeline, type PipelineDeps, type RequestConfig } from "./pipeline.js";
 import type { Logger, ResolvedConfig } from "../shared/index.js";
 import type { FicMeta } from "./fic-meta.js";
+import type { DeliveryOutcome } from "../follows/index.js";
 import {
   DownloadFailedError,
   DownloadLaunchError,
@@ -100,6 +101,7 @@ function setup(overrides: Partial<PipelineDeps> = {}, opts: { initial?: QueueIte
     newId: () => `req-${++ids}`,
     logger,
     now: opts.now ?? (() => 0),
+    follows: { onDelivered: async () => ({ kind: "none" }) },
     ...overrides,
   };
   const pipeline = createPipeline(config, deps);
@@ -926,5 +928,175 @@ describe("createBot — sequential processing (grammY long polling)", () => {
       "download:end 222",
       "upload done",
     ]);
+  });
+});
+
+describe("delivery action per follow outcome (feature 5; acceptance 1, 3, 5, 6, 7, 12, 13)", () => {
+  const FMETA: FicMeta = {
+    workId: "65164981",
+    url: LINK,
+    title: "Title",
+    author: "Someone",
+    chapters: 12,
+    status: "in-progress",
+  };
+  type Sent = { text: string; action: unknown };
+
+  function followSetup(
+    opts: { outcome?: DeliveryOutcome | Error; meta?: FicMeta; initial?: QueueItem[]; upload?: PipelineDeps["upload"] } = {},
+  ) {
+    const onDelivered = vi.fn(async (_meta: FicMeta | undefined): Promise<DeliveryOutcome> => {
+      if (opts.outcome instanceof Error) throw opts.outcome;
+      return opts.outcome ?? { kind: "none" };
+    });
+    const download = vi.fn(async () => ({ ...RESULT, ...(opts.meta !== undefined && { meta: opts.meta }) }));
+    const ctx = setup(
+      {
+        follows: { onDelivered },
+        download: download as unknown as PipelineDeps["download"],
+        ...(opts.upload !== undefined && { upload: opts.upload }),
+      },
+      { initial: opts.initial ?? [] },
+    );
+    const replies: Sent[] = [];
+    const notices: Sent[] = [];
+    const reply = async (text: string, action?: unknown) => void replies.push({ text, action });
+    const notify = async (text: string, action?: unknown) => void notices.push({ text, action });
+    return { ...ctx, onDelivered, download, replies, notices, reply, notify };
+  }
+
+  const retryItem = (overrides: Partial<QueueItem> = {}) => queued({ meta: FMETA, ...overrides });
+
+  it("offer → delivered + action follow (criterion 1); onDelivered gets the download's meta", async () => {
+    const { pipeline, reply, replies, onDelivered } = followSetup({ outcome: { kind: "offer" }, meta: FMETA });
+    await pipeline.handle(LINK, reply);
+    expect(onDelivered).toHaveBeenCalledExactlyOnceWith(FMETA);
+    expect(replies).toEqual([
+      { text: messages.ack, action: undefined },
+      { text: messages.delivered("Title"), action: { action: "follow", workId: "65164981" } },
+    ]);
+  });
+
+  it("none → delivered with no action (criterion 3)", async () => {
+    const { pipeline, reply, replies } = followSetup({ outcome: { kind: "none" }, meta: FMETA });
+    await pipeline.handle(LINK, reply);
+    expect(replies.at(-1)).toEqual({ text: messages.delivered("Title"), action: undefined });
+  });
+
+  it("no meta → onDelivered(undefined), no action (criterion 6)", async () => {
+    const { pipeline, reply, replies, onDelivered } = followSetup();
+    await pipeline.handle(LINK, reply);
+    expect(onDelivered).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(replies.at(-1)).toEqual({ text: messages.delivered("Title"), action: undefined });
+  });
+
+  it("updated → deliveredFollowUpdated + action unfollow (criterion 5)", async () => {
+    const { pipeline, reply, replies } = followSetup({ outcome: { kind: "updated", chapters: 14 }, meta: FMETA });
+    await pipeline.handle(LINK, reply);
+    expect(replies.at(-1)).toEqual({
+      text: messages.deliveredFollowUpdated("Title", 14),
+      action: { action: "unfollow", workId: "65164981" },
+    });
+  });
+
+  it("completed → deliveredCompletedUnfollowed, no action (criterion 13)", async () => {
+    const { pipeline, reply, replies } = followSetup({ outcome: { kind: "completed" }, meta: FMETA });
+    await pipeline.handle(LINK, reply);
+    expect(replies.at(-1)).toEqual({ text: messages.deliveredCompletedUnfollowed("Title"), action: undefined });
+  });
+
+  it("onDelivered rejecting → plain delivered message without action, error logged", async () => {
+    const boom = new Error("disk full");
+    const { pipeline, reply, replies, logger } = followSetup({ outcome: boom, meta: FMETA });
+    await pipeline.handle(LINK, reply);
+    expect(replies.at(-1)).toEqual({ text: messages.delivered("Title"), action: undefined });
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: boom }));
+  });
+
+  it("a failed upload never calls onDelivered", async () => {
+    const { pipeline, reply, onDelivered } = followSetup({ upload: vi.fn().mockRejectedValue(UNREACHABLE), meta: FMETA });
+    await pipeline.handle(LINK, reply);
+    expect(onDelivered).not.toHaveBeenCalled();
+  });
+
+  it("downloads exactly once per delivery, whatever the outcome (criterion 12)", async () => {
+    for (const outcome of [{ kind: "offer" }, { kind: "updated", chapters: 14 }] as const) {
+      const { pipeline, reply, download } = followSetup({ outcome, meta: FMETA });
+      await pipeline.handle(LINK, reply);
+      expect(download).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("retry: an upload-stage item with meta → onDelivered(meta), delivered + action follow (criterion 7)", async () => {
+    const item = retryItem();
+    const { pipeline, notify, notices, onDelivered } = followSetup({ outcome: { kind: "offer" }, initial: [item] });
+    await pipeline.processDue([item], notify);
+    expect(onDelivered).toHaveBeenCalledExactlyOnceWith(FMETA);
+    expect(notices).toEqual([{ text: messages.delivered("Title"), action: { action: "follow", workId: "65164981" } }]);
+  });
+
+  it("retry: a download-stage item uses the meta of the retry's download, which runs once", async () => {
+    const { epubPath: _e, title: _t, ...rest } = retryItem();
+    const item: QueueItem = { ...rest, stage: "download" };
+    const { pipeline, notify, notices, onDelivered, download } = followSetup({
+      outcome: { kind: "offer" },
+      meta: FMETA,
+      initial: [item],
+    });
+    await pipeline.processDue([item], notify);
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(onDelivered).toHaveBeenCalledExactlyOnceWith(FMETA);
+    expect(notices.at(-1)?.action).toEqual({ action: "follow", workId: "65164981" });
+  });
+
+  it("retry: a deferred item whose download succeeds on a retry delivers with its meta and offers Follow (#7, R2.5)", async () => {
+    const { epubPath: _e, title: _t, ...rest } = retryItem();
+    const item: QueueItem = { ...rest, stage: "download", deferred: true, attempts: 6, nextAttemptAt: 2 * HOUR };
+    const { pipeline, notify, notices, onDelivered, download, queue } = followSetup({
+      outcome: { kind: "offer" },
+      meta: FMETA,
+      initial: [item],
+    });
+    await pipeline.processDue([item], notify);
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(onDelivered).toHaveBeenCalledExactlyOnceWith(FMETA);
+    expect(notices).toEqual([{ text: messages.delivered("Title"), action: { action: "follow", workId: "65164981" } }]);
+    expect(queue.items()).toEqual([]);
+  });
+
+  it("retry: an item without meta (pre-feature queue) → onDelivered(undefined), no action", async () => {
+    const item = queued({});
+    const { pipeline, notify, notices, onDelivered } = followSetup({ initial: [item] });
+    await pipeline.processDue([item], notify);
+    expect(onDelivered).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(notices).toEqual([{ text: messages.delivered("Title"), action: undefined }]);
+  });
+
+  it("retry: updated and completed outcomes pick their message too", async () => {
+    const item = retryItem();
+    const a = followSetup({ outcome: { kind: "updated", chapters: 14 }, initial: [item] });
+    await a.pipeline.processDue([item], a.notify);
+    expect(a.notices).toEqual([
+      { text: messages.deliveredFollowUpdated("Title", 14), action: { action: "unfollow", workId: "65164981" } },
+    ]);
+    const b = followSetup({ outcome: { kind: "completed" }, initial: [item] });
+    await b.pipeline.processDue([item], b.notify);
+    expect(b.notices).toEqual([{ text: messages.deliveredCompletedUnfollowed("Title"), action: undefined }]);
+  });
+
+  it("retry: onDelivered rejecting → plain delivered notice, error logged", async () => {
+    const boom = new Error("disk full");
+    const item = retryItem();
+    const { pipeline, notify, notices, logger } = followSetup({ outcome: boom, initial: [item] });
+    await pipeline.processDue([item], notify);
+    expect(notices).toEqual([{ text: messages.delivered("Title"), action: undefined }]);
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: boom }));
+  });
+
+  it("retry: a failed upload never calls onDelivered", async () => {
+    const item = retryItem();
+    const { pipeline, notify, onDelivered } = followSetup({ upload: vi.fn().mockRejectedValue(UNREACHABLE), initial: [item] });
+    await pipeline.processDue([item], notify);
+    expect(onDelivered).not.toHaveBeenCalled();
   });
 });

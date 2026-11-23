@@ -2,8 +2,10 @@ import type { Logger, ResolvedConfig } from "../shared/index.js";
 import { failureMessage, messages } from "./messages.js";
 import type { Queue, QueueItem, Spool } from "../retry-queue/index.js";
 import { UploadFailedError, type UploadOptions, type uploadToKindle } from "../kindle/index.js";
+import type { Follows } from "../follows/index.js";
 import { extractWorkLink } from "./ao3-link.js";
 import { DownloadFailedError, type DownloadResult, type downloadEpub } from "./downloader.js";
+import type { FicMeta } from "./fic-meta.js";
 import { classifyFailure, isRateLimited } from "./failure.js";
 
 /** The slice of the config the pipeline needs (the tests do not build a full config). */
@@ -33,10 +35,18 @@ export type PipelineDeps = {
   logger: Logger;
   /** Clock for the cooldown message; defaults to `Date.now`. */
   now?: () => number;
+  /** Feature 5: decides, after each delivery, whether to offer Follow (R3.1, R6). */
+  follows: Pick<Follows, "onDelivered">;
 };
 
-/** Sends one text to the owner; failures are the caller's to swallow. */
-export type Send = (text: string) => Promise<unknown>;
+/**
+ * The button a delivery message carries, as the pipeline sees it (no Telegram types here): offer
+ * Follow, offer Unfollow, or nothing. `src/telegram/` translates it into an inline keyboard.
+ */
+export type DeliveryAction = { action: "follow" | "unfollow"; workId: string } | undefined;
+
+/** Sends one text to the owner, optionally with a delivery action; failures are the caller's to swallow. */
+export type Send = (text: string, action?: DeliveryAction) => Promise<unknown>;
 
 export type Pipeline = {
   /** Handles one message from the owner, end to end. Never throws. */
@@ -112,9 +122,9 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
   };
 
   /** A failed Telegram send is logged and ignored: it must not abort a delivery. */
-  const safely = async (send: Send, message: string): Promise<void> => {
+  const safely = async (send: Send, message: string, action?: DeliveryAction): Promise<void> => {
     try {
-      await send(message);
+      await (action === undefined ? send(message) : send(message, action));
     } catch (err) {
       logger.warn("could not send a Telegram message", { error: err });
     }
@@ -131,6 +141,39 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
     const result = await deps.download(url, dir, { timeoutMs: config.downloadTimeoutMs, workId });
     if (result.metaWarning !== undefined) logger.warn(result.metaWarning, { workId, id });
     return result;
+  };
+
+  /**
+   * The delivery message of a delivered fic and the action that goes with it (R3.1, R6.2, R6.4).
+   * A follows failure is logged and the plain message is used: the fic was delivered either way.
+   */
+  const deliveryNotice = async (
+    title: string,
+    meta: FicMeta | undefined,
+  ): Promise<{ text: string; action?: DeliveryAction }> => {
+    try {
+      const outcome = await deps.follows.onDelivered(meta);
+      switch (outcome.kind) {
+        case "offer":
+          if (meta !== undefined) return { text: messages.delivered(title), action: { action: "follow", workId: meta.workId } };
+          break;
+        case "updated":
+          if (meta !== undefined) {
+            return {
+              text: messages.deliveredFollowUpdated(title, outcome.chapters),
+              action: { action: "unfollow", workId: meta.workId },
+            };
+          }
+          break;
+        case "completed":
+          return { text: messages.deliveredCompletedUnfollowed(title) };
+        case "none":
+          break;
+      }
+    } catch (err) {
+      logger.error("could not record the delivery in the follows file", { workId: meta?.workId, error: err });
+    }
+    return { text: messages.delivered(title) };
   };
 
   const handle = async (text: string, reply: Send): Promise<void> => {
@@ -172,7 +215,8 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
         result = await download(id, link.canonicalUrl, link.workId);
         await deps.upload(result.filePath, uploadOptions);
         logger.info("delivered", { workId: link.workId, title: result.title });
-        await say(messages.delivered(result.title));
+        const notice = await deliveryNotice(result.title, result.meta);
+        await safely(reply, notice.text, notice.action);
         await discard(id);
         return;
       } catch (err) {
@@ -230,7 +274,8 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
       logger.info("delivered on retry", { id: current.id, title: current.title });
       await queue.remove(current.id);
       await discard(current.id);
-      await safely(notify, messages.delivered(current.title ?? current.url));
+      const notice = await deliveryNotice(current.title ?? current.url, current.meta);
+      await safely(notify, notice.text, notice.action);
     } catch (err) {
       logger.warn("retry failed", { id: current.id, error: err, stderr: stderrOf(err) });
       if (!(err instanceof RateLimitStillOn) && classifyFailure(err) === "permanent") {

@@ -19,6 +19,12 @@ export const messages = {
   unsupportedLink: "That type of AO3 link isn't supported yet. Send me a link to a single work.",
   /** R5.4 */
   delivered: (title: string) => `Delivered “${title}” to your Kindle.`,
+  /** Feature 5, R6.2: a followed fic delivered again; its stored chapter count was updated. */
+  deliveredFollowUpdated: (title: string, chapters: number) =>
+    `Delivered “${title}” to your Kindle. I updated your follow: now ${chapterCount(chapters)}.`,
+  /** Feature 5, R6.4: a followed fic delivered again that is complete now. */
+  deliveredCompletedUnfollowed: (title: string) =>
+    `Delivered “${title}” to your Kindle. It's complete now, so I'm no longer following it.`,
   /** R3.3, R3.4 */
   downloadFailed: (detail: string) => `I couldn't download that fic: ${detail}`,
   /** R3.5 */
@@ -60,6 +66,11 @@ export const messages = {
 
 const RATE_LIMIT_TROUBLE =
   "FanFicFare is having trouble with AO3 right now (it keeps getting “429 Too Many Requests”), ";
+
+/** `1` → `"1 chapter"`, `12` → `"12 chapters"`. */
+function chapterCount(chapters: number): string {
+  return `${chapters} ${chapters === 1 ? "chapter" : "chapters"}`;
+}
 
 /** A wait for the owner: whole minutes up to 90 (at least 1), whole hours past that. */
 function formatWait(ms: number): string {

@@ -53,12 +53,12 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: an item with an invalid `meta` loads, with `meta` dropped and the item kept.
   - Test: an item carrying both `deferred: true` and `meta` survives a write and a read with both intact; a deferred item enqueued straight away (cooldown) has no `meta`, and `promoteToUpload` on a deferred item sets `meta` while keeping `deferred` (#7).
 
-- [ ] **T7 — messages + keyboards.**
+- [x] **T7 — messages + keyboards.**
   - New messages from design.md, plain text, per context: `src/follows/messages.ts` (follows texts) and `src/fanfic/messages.ts` (delivery texts); `followKeyboard(workId)`, `unfollowKeyboard(workId)`, `FOLLOW_DATA` in `src/telegram/` (tests colocated: `src/follows/messages.test.ts`, `src/telegram/bot.follow.test.ts`).
   - Test: `callback_data` is `fo:<workId>` / `uf:<workId>`, at most 64 bytes for a 12-digit id; `FOLLOW_DATA` matches both and rejects `fo:abc`, `fo:`, `xx:123` (R3.2, R4.3).
   - Test: `nowFollowing("T", 12)` mentions 12 chapters; a title with `_`, `*` and `[` is kept literally (R8.1).
 
-- [ ] **T8 — `src/fanfic/pipeline.ts` + `src/telegram/bot.ts`: delivery messages with buttons.** Tests in `src/fanfic/pipeline.test.ts` (fakes as in the existing pipeline tests) and `src/telegram/bot.follow.test.ts`; `follows` faked.
+- [x] **T8 — `src/fanfic/pipeline.ts` + `src/telegram/bot.ts`: delivery messages with buttons.** Tests in `src/fanfic/pipeline.test.ts` (fakes as in the existing pipeline tests) and `src/telegram/bot.follow.test.ts`; `follows` faked.
   - `PipelineDeps.follows`; `Send` takes an optional abstract `DeliveryAction` (`{ action: "follow" | "unfollow"; workId } | undefined`), no grammY in `src/fanfic`; `src/telegram/bot.ts` translates it into the `InlineKeyboard`; `handle()` and `retry()` call `onDelivered` after a successful upload.
   - Test: outcome `offer` → delivery message with action `follow` (Telegram translates it to the Follow keyboard) (acceptance criterion 1); `none` → without keyboard (criteria 3, 6); `updated` → `deliveredFollowUpdated` with action `unfollow` (Unfollow keyboard) (criterion 5); `completed` → `deliveredCompletedUnfollowed` without keyboard (criterion 13).
   - Test: a retry delivery of an item with `meta` passes it to `onDelivered` and offers Follow (criterion 7); a retry of an item without `meta` passes `undefined`.
@@ -68,7 +68,7 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: the existing pipeline tests pass, adjusted only for the new dependency.
   - Test: a deferred item (`deferred: true`) whose download succeeds on a retry delivers with its `meta` and offers Follow.
 
-- [ ] **T9 — `src/telegram/bot.ts`: Follow and Unfollow taps** (test `src/telegram/bot.follow.test.ts`).
+- [x] **T9 — `src/telegram/bot.ts`: Follow and Unfollow taps** (test `src/telegram/bot.follow.test.ts`).
   - `bot.callbackQuery(FOLLOW_DATA, …)` registered before the generic `callback_query` fallback.
   - Test: `fo:<id>` → `answerCallbackQuery`, `follow(id)`; `followed`/`already` → the markup becomes the Unfollow keyboard and the matching reply is sent (criterion 2); `unknown` → the markup is removed and `followUnknown()` is replied (criterion 14).
   - Test: `uf:<id>` → `unfollow(id)`; `unfollowed` → the markup is removed and `unfollowed(title)` is replied (criterion 4); `not-followed` → `notFollowing()`.
@@ -77,7 +77,7 @@ The order follows the dependencies: pure helpers first, then the stores, then th
   - Test: a tap from a non-owner → nothing called, no reply (criterion 10).
   - Test: the feature 3 `ow:` buttons still work, and a document delivery has no Follow button (criterion 11).
 
-- [ ] **T10 — Startup wiring (`src/app/daemon.ts` / `src/index.ts`)** (test `src/app/daemon.test.ts`).
+- [x] **T10 — Startup wiring (`src/app/daemon.ts` / `src/index.ts`)** (test `src/app/daemon.test.ts`).
   - Read `follows.json` at startup, create `Follows`, pass it to the pipeline and the bot.
   - Test: a corrupt `follows.json` → the daemon starts, the error log names the backup path, and the state is empty (criterion 9).
   - Test: a valid file → the followed fics are available to the first tap after startup.

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedConfig } from "../shared/index.js";
 import { createDaemon } from "./daemon.js";
-import { messages } from "../fanfic/index.js";
+import { type FicMeta, messages } from "../fanfic/index.js";
+import { followsMessages } from "../follows/index.js";
 import { messages as queueMessages, type QueueItem } from "../retry-queue/index.js";
 
 const MIN = 60_000;
@@ -163,5 +164,66 @@ describe("pollUntilStopped (R7.1: a crash must end the process so launchd relaun
     const bot = { start: vi.fn(async () => {}) };
     await expect(pollUntilStopped(bot, daemon, silent())).resolves.toBeUndefined();
     expect(daemon.stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("follows file at startup (R5.2, R5.3; acceptance 8, 9, 15)", () => {
+  const META: FicMeta = {
+    workId: "1",
+    url: "https://archiveofourown.org/works/1",
+    title: "Title",
+    author: "Someone",
+    chapters: 12,
+    status: "in-progress",
+  };
+
+  it("no follows file → starts with nothing followed, no error logged", async () => {
+    const logger = silent();
+    const daemon = await createDaemon(config, { logger, notify: vi.fn(async () => {}) });
+    expect(await daemon.follows.follow("1")).toEqual({ kind: "unknown" });
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("a corrupt follows file → the daemon starts empty, the file is kept aside, the error log names the backup, the owner is told", async () => {
+    await writeFile(config.followsPath, "{ broken");
+    const logger = silent();
+    const notify = vi.fn(async () => {});
+    const daemon = await createDaemon(config, { logger, notify });
+    daemon.start();
+    const backups = (await readdir(root)).filter((n) => n.startsWith("follows.json.corrupt-"));
+    expect(backups).toHaveLength(1);
+    const backup = join(root, backups[0]!);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("follows"), { corruptBackup: backup });
+    expect(await daemon.follows.follow("1")).toEqual({ kind: "unknown" });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(followsMessages.followsFileCorrupt(backup)));
+    daemon.stop();
+  });
+
+  it("a valid follows file → the first tap after startup sees the followed and recent fics", async () => {
+    const followed = { ...META, workId: "7", title: "Kept", followedAt: 1, updatedAt: 2 };
+    await writeFile(config.followsPath, JSON.stringify({ version: 1, followed: [followed], recent: [META] }));
+    const logger = silent();
+    const daemon = await createDaemon(config, { logger, notify: vi.fn(async () => {}) });
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(await daemon.follows.follow("7")).toEqual({ kind: "already", fic: followed });
+    expect((await daemon.follows.follow("1")).kind).toBe("followed");
+    expect(await daemon.follows.unfollow("7")).toEqual({ kind: "unfollowed", title: "Kept" });
+    const saved = JSON.parse(await readFile(config.followsPath, "utf8"));
+    expect(saved.followed.map((f: { workId: string }) => f.workId)).toEqual(["1"]);
+  });
+
+  it("the pipeline uses the same follows: a retry delivery offers Follow, and the tap then follows it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], now: 10 * MIN });
+    await persistedItem({ nextAttemptAt: 9 * MIN, meta: META });
+    const notify = vi.fn(async () => {});
+    const daemon = await createDaemon(config, { logger: silent(), notify, upload: vi.fn(async () => {}) });
+    daemon.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() =>
+      expect(notify).toHaveBeenCalledWith(messages.delivered("Title"), { action: "follow", workId: "1" }),
+    );
+    expect((await daemon.follows.follow("1")).kind).toBe("followed");
+    expect(JSON.parse(await readFile(config.followsPath, "utf8")).followed).toHaveLength(1);
+    daemon.stop();
   });
 });

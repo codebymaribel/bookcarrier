@@ -13,3 +13,4 @@ export {
   parseFollowsState,
   type UnfollowResult,
 } from "./follows.js";
+export { messages as followsMessages } from "./messages.js";
