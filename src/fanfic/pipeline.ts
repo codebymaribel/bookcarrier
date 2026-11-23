@@ -62,6 +62,18 @@ function stderrOf(err: unknown): string | undefined {
     : undefined;
 }
 
+/**
+ * The whole log line for a download AO3 refused with a 429. Its traceback is long and always the
+ * same, so it is left out; any other failure still logs its error and stderr.
+ */
+const RATE_LIMITED_LOG = "download failed -> 429 Client Error: Too Many Requests";
+
+/** The AO3 work id of a queued request (its `url` is canonical), or the url itself if it has none. */
+function workIdOf(url: string): string {
+  const link = extractWorkLink(url);
+  return link.ok ? link.workId : url;
+}
+
 /** The short error text kept in the queue and shown on give-up. */
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -220,7 +232,8 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
         await discard(id);
         return;
       } catch (err) {
-        logger.error("request failed", { workId: link.workId, error: err, stderr: stderrOf(err) });
+        if (isRateLimited(err)) logger.warn(RATE_LIMITED_LOG, { workId: link.workId });
+        else logger.error("request failed", { workId: link.workId, error: err, stderr: stderrOf(err) });
         if (classifyFailure(err) === "transient") {
           try {
             await queue.enqueue({
@@ -277,7 +290,8 @@ export function createPipeline(config: RequestConfig, deps: PipelineDeps): Pipel
       const notice = await deliveryNotice(current.title ?? current.url, current.meta);
       await safely(notify, notice.text, notice.action);
     } catch (err) {
-      logger.warn("retry failed", { id: current.id, error: err, stderr: stderrOf(err) });
+      if (isRateLimited(err)) logger.warn(RATE_LIMITED_LOG, { workId: workIdOf(current.url) });
+      else logger.warn("retry failed", { id: current.id, error: err, stderr: stderrOf(err) });
       if (!(err instanceof RateLimitStillOn) && classifyFailure(err) === "permanent") {
         await queue.remove(current.id);
         await discard(current.id);
