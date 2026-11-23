@@ -1,6 +1,7 @@
 import type { Bot } from "grammy";
 import { checkRequiredBinaries } from "./shared/binaries.js";
-import { createBot, notifyOwner, type Send } from "./telegram/bot.js";
+import type { Send } from "./fanfic/pipeline.js";
+import { createBot, notifyOwner } from "./telegram/bot.js";
 import { ConfigError, loadConfig, type ResolvedConfig } from "./shared/config.js";
 import { createDaemon, pollUntilStopped } from "./app/daemon.js";
 import { logger } from "./shared/logger.js";

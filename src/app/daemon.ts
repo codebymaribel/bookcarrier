@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createPipeline, type Pipeline, type PipelineDeps, type Send } from "../telegram/bot.js";
+import { createPipeline, type Pipeline, type PipelineDeps, type Send } from "../fanfic/pipeline.js";
 import type { ResolvedConfig } from "../shared/config.js";
 import { downloadEpub } from "../fanfic/downloader.js";
 import type { Logger } from "../shared/logger.js";
