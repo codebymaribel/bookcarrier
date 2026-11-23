@@ -16,12 +16,14 @@ Branch `feature/ao3-rate-limit-deferral`. Builds on docs/specs/02-retry-queue (R
 
 ## Tasks
 
-- [ ] T1 rate-limit detection, deferred state in queue/state, config keys — S1–S4, S7 — inline — commit:
-- [ ] T2 pipeline: defer on give-up, deferred notifications, cooldown for new links, daemon wiring — S1, S4–S6 — inline — commit:
-- [ ] T3 docs: README EN/ES, config.example.json — S8 — inline — commit:
+- [x] T1 rate-limit detection, deferred state in queue/state, config keys — S1–S4, S7 — inline — commit: 3b15f32
+- [x] T2 pipeline: defer on give-up, deferred notifications, cooldown for new links, daemon wiring — S1, S4–S6 — inline — commit: 3b15f32
+- [x] T3 docs: README EN/ES, config.example.json — S8 — inline — commit: 75e5761
 
 ## Log
 
 - L1: "tenemos un inconveniente en el proyecto. fanficfare (o ao3 realmente) esta devolviendo 429 Client Error: Too Many Requests. lleva horas en eso por lo que el bot no funciona. Que quiero implementar: si se acaba el plazo de retry y aun no se ha completado el queue por el error, que guardemos esos requests, le avisemos al usuario que hay inconvenientes con fanficfare e intentaremos luego y que intentemos de nuevo pasadas unas horas"
 - L2: Owner decisions: wait "2 horas"; limit "Cada N horas hasta 24 h"; scope "Solo 429 / rate-limit"; new links during cooldown "Diferirlo directo".
 - L3: Parent decision: a deferred item whose download succeeds stays deferred through its upload, so an upload failure right after waits the deferred cadence (2 h) until the 24 h limit instead of restarting the 30-minute ladder (whose window is already spent).
+- L4: T1+T2 test-first (RED 26 + 5 → GREEN). One existing test changed on purpose: "a download-stage item that gives up is named by its URL" used a 429 to force the give-up, which S2 now defers; it uses a timeout instead (same old behavior). `pnpm test` 533/533, typecheck 0. If deferring a new link during the cooldown cannot be persisted, the link is tried at once as before (logged). T1+T2 share commit 3b15f32 so typecheck stays green.
+- L5: Slice boundary: 3b15f32 (code+tests, ~600 lines, mostly tests) | 75e5761 (docs). Branch ~670 authored lines; delivery shape is the owner's decision.
