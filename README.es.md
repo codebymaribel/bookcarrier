@@ -20,7 +20,7 @@ celular ──enviar archivo──▶ bot de Telegram ──▶ Bookcarrier ─�
 - Acepta un documento enviado al bot como archivo (por defecto EPUB, MOBI o PDF, de hasta 20 MB) y lo copia a su carpeta en la Kindle (`/mnt/us/documents/books/` por defecto, no la carpeta de los fics). Si ya hay un archivo con ese nombre, pregunta si lo reemplaza.
 - Lo copia a la Kindle con `scp`.
 - Te avisa en el chat si se entregó o qué falló exactamente.
-- Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos (ver [Cola de reintentos](#cola-de-reintentos)). Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
+- Si el fallo es transitorio (AO3 caído o limitando pedidos, el WiFi de la Kindle dormido), **guarda el pedido en una cola persistente y lo reintenta por su cuenta** durante hasta 30 minutos; si para entonces AO3 sigue limitando pedidos (`429`), guarda el pedido y lo vuelve a intentar cada 2 horas durante hasta 24 horas (ver [Cola de reintentos](#cola-de-reintentos)). Los documentos **no** se reintentan: si la Kindle no responde, volvés a mandar el archivo.
 
 - Puede correr como LaunchAgent de macOS: arranca al iniciar sesión y vuelve solo si se cae (ver [Ejecutalo como LaunchAgent](#4-ejecutalo-como-launchagent)).
 - Tiene un panel de control: `bookcarrierctl` en la terminal y un ítem en la barra de menú (SwiftBar) para arrancar, frenar y revisar el demonio (ver [Panel de control](#panel-de-control)).
@@ -81,6 +81,8 @@ Después editalo:
 | `spoolDir` | | `~/.bookcarrier/spool` | Dónde esperan su entrega los EPUB descargados. Nunca la carpeta temporal del sistema. El `~` se expande. |
 | `giveUpAfterMs` | | `1800000` | Se abandona un pedido en cola este tiempo después de haberse encolado por primera vez (30 min). |
 | `retryBackoffMinutes` | | `[1, 2, 4, 8, 15]` | Espera antes de cada reintento, en minutos. Una lista no vacía de enteros positivos. |
+| `deferredRetryMs` | | `7200000` | Cuando AO3 sigue respondiendo `429` pasado `giveUpAfterMs`, el pedido se guarda y se reintenta con esta frecuencia (2 h). Ver [Cola de reintentos](#cola-de-reintentos). |
+| `deferredGiveUpAfterMs` | | `86400000` | Un pedido diferido por el límite de AO3 se abandona cuando su próximo reintento caería más allá de este tiempo desde que se encoló por primera vez (24 h). |
 
 Si falta un campo obligatorio o tiene un tipo equivocado, el demonio no arranca y el log dice cuál es el campo con problemas.
 
@@ -222,6 +224,9 @@ Compartí (o pegá) un link a un work de AO3 con el bot, o mandale un documento 
 | Un link, pero la Kindle está apagada o dormida | El fic se descargó pero no se pudo enviar; lo va a seguir reintentando durante hasta 30 minutos. |
 | (más tarde) un pedido en cola llega a destino | `Delivered “Título” to your Kindle.` |
 | (más tarde) pasan 30 minutos sin éxito | Que lo abandonó, con el último error. Volvé a compartir el link para intentarlo otra vez. |
+| (más tarde) pasan 30 minutos y AO3 sigue respondiendo `429` | Que FanFicFare tiene problemas con AO3; guardó el pedido y lo va a volver a intentar en unas 2 horas, durante hasta 24 horas. |
+| Un link mientras hay un pedido esperando por el `429` de AO3 | Lo guarda sin descargarlo (no toca AO3) y te dice cuándo lo va a intentar. |
+| (más tarde) pasan 24 horas y AO3 sigue respondiendo `429` | Que lo abandonó porque AO3 siguió limitando a FanFicFare, con el último error. |
 | Un link, pero la llave SSH o `scp` están mal configurados | Un error de configuración que nombra el problema (llave ausente, permisos abiertos, `scp` no encontrado). |
 
 Si un mensaje trae varios links de AO3, solo se usa el primero.
@@ -259,6 +264,18 @@ Un pedido en cola recuerda su **etapa**. Si falló la descarga, el reintento vue
 - **Sin trabajo en reposo:** con la cola vacía no hay ningún timer; si no, un único timer apunta al próximo reintento pendiente.
 
 La ventana y la escalera de esperas se configuran (`giveUpAfterMs`, `retryBackoffMinutes`).
+
+### Cuando AO3 sigue limitando pedidos (`429`)
+
+AO3 puede responder `429 Too Many Requests` durante horas. Un pedido cuya ventana de 30 minutos se agota mientras el último error sigue siendo un `429` **no** se abandona:
+
+- Queda **diferido** (en el archivo de la cola, así que sobrevive a un reinicio) y se reintenta **cada 2 horas**.
+- Recibís un mensaje diciendo que FanFicFare tiene problemas con AO3 y cuándo lo va a volver a intentar. Los reintentos diferidos fallidos son silenciosos; una entrega se avisa como siempre.
+- Se abandona (y te avisa, con el último error) cuando su próximo reintento caería más de **24 horas** después de haberse encolado por primera vez.
+- Mientras haya algún pedido diferido, se considera que AO3 está **en enfriamiento**: un link nuevo no se descarga, se guarda como diferido y se intenta junto con el pedido diferido más próximo. Así no se alarga el límite.
+- Solo se difieren los fallos por límite de pedidos. Cualquier otro fallo (`403`/`5xx` de AO3, un timeout, la Kindle dormida) se sigue abandonando a los 30 minutos. Un pedido diferido que se descarga pero después no llega a la Kindle mantiene la frecuencia de 2 horas.
+
+Los dos límites se configuran (`deferredRetryMs`, `deferredGiveUpAfterMs`).
 
 ## Cómo funciona
 
@@ -341,7 +358,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 
 ## Limitaciones conocidas
 
-- Los reintentos terminan 30 minutos después del primer fallo: si la Kindle queda apagada más tiempo, el pedido se abandona y hay que volver a compartir el link (un toque desde el celular). La ventana se configura (`giveUpAfterMs`).
+- Los reintentos terminan 30 minutos después del primer fallo: si la Kindle queda apagada más tiempo, el pedido se abandona y hay que volver a compartir el link (un toque desde el celular). La ventana se configura (`giveUpAfterMs`). Solo el límite `429` de AO3 tiene el diferimiento más largo, de 24 horas.
 - Un pedido que todavía está en su primer intento cuando el demonio se detiene se pierde; solo los pedidos que ya están en la cola sobreviven a un reinicio.
 - Los títulos con acentos los pierden en el nombre del archivo y en el mensaje de confirmación (`Corazón` → `Coraz_n`), porque FanFicFare sanitiza los nombres de archivo.
 - Solo se soportan works individuales de AO3 (no series ni colecciones).
