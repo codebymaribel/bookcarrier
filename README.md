@@ -254,7 +254,7 @@ Every failure is classified as **transient** or **permanent**:
 A queued request remembers its **stage**. If the download failed, the retry downloads again; if only the copy to the Kindle failed, the EPUB is already in the spool and the retry only runs `scp` — AO3 is not hit again.
 
 - **Backoff:** retries happen 1, 2, 4, 8 and 15 minutes apart (cumulative 1, 3, 7, 15, 30).
-- **Give up:** 30 minutes after it was first enqueued, the request is abandoned and its EPUB deleted from the spool.
+- **Give up:** 30 minutes after it was first enqueued, the request is abandoned and its EPUB deleted from the spool — except when AO3 is still rate-limiting (`429`), see [below](#when-ao3-keeps-rate-limiting-429).
 - **Notifications:** one message when it is enqueued, one when it is delivered (with the title), one when it is given up (with the last error). Failed attempts in between are silent.
 - **Persistence:** the queue lives in `~/.bookcarrier/queue.json` (written atomically) and the EPUBs in `~/.bookcarrier/spool/`. After a restart the daemon restores the queue, reschedules the retries and deletes spool files no queued item refers to. If the queue file is unreadable, it is kept aside as `queue.json.corrupt-<timestamp>`, the daemon starts with an empty queue and tells you.
 - **No idle work:** with an empty queue there is no timer at all; otherwise a single timer points at the next due retry.
@@ -303,7 +303,7 @@ src/
   index.ts        entrypoint: loads the config, checks binaries, starts long polling
   daemon.ts       startup: restores the queue, reconciles the spool, arms the retry timer
   bot.ts          owner filter + the request flow (orchestration)
-  errors.ts       transient vs permanent failure classification
+  errors.ts       transient vs permanent failure classification, AO3 rate-limit (429) detection
   binaries.ts     startup check that fanficfare, scp and ssh are on the PATH
   queue/          retry queue: state file, backoff, spool, single timer
   messages.ts     every text sent to the owner, and the error → message mapping
@@ -345,7 +345,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 | #   | Feature                                               | State        |
 | --- | ----------------------------------------------------- | ------------ |
 | 1   | Send an AO3 fic from a link                           | ✅ Done      |
-| 2   | Retry queue + start at login with launchd             | ✅ Done      |
+| 2   | Retry queue + start at login with launchd (+ deferral on AO3 `429`) | ✅ Done      |
 | 3   | Send a document as a file (EPUB, MOBI, PDF)           | ✅ Done      |
 | 4   | Control panel: `bookcarrierctl` + menu bar (SwiftBar) | ✅ Done      |
 | 5   | “Follow” button and chapter tracking                  | Planned      |

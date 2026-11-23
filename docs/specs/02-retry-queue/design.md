@@ -19,6 +19,7 @@ type QueueItem = {
   firstQueuedAt: number;   // epoch ms — basis for the give-up window
   nextAttemptAt: number;   // epoch ms — when the next attempt is due
   lastError: string;       // last error, for the give-up message
+  deferred?: boolean;      // R8: AO3's 429 outlasted the window; retried every few hours
 };
 
 type QueueState = {
@@ -26,6 +27,8 @@ type QueueState = {
   items: QueueItem[];
 };
 ```
+
+`deferred` (R8) is optional, so files written before it still parse and older code ignores it; `version` stays `1`.
 
 `version` is there from day one on purpose: when this migrates to SQLite or changes shape, an old file will be recognizable instead of blowing up.
 

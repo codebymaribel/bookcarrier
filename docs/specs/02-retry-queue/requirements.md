@@ -46,7 +46,7 @@ This covers the common case well: the Kindle with sleeping WiFi, which comes bac
 
 ### R4 — Giving up
 
-- R4.1: When the time elapsed since an item's first enqueue exceeds the configured window (by default 30 minutes), the system shall give up on the item, remove it from the queue and notify the owner that it was abandoned, stating the last error.
+- R4.1: When the time elapsed since an item's first enqueue exceeds the configured window (by default 30 minutes), the system shall give up on the item, remove it from the queue and notify the owner that it was abandoned, stating the last error. Exception: a download still failing with AO3's rate limit is deferred instead (R8).
 - R4.2: When an item is abandoned and had an EPUB in the spool, the system shall delete that file.
 
 ### R5 — File spool
@@ -74,6 +74,19 @@ R2's persistence promise is useless if the daemon dies and does not come back. T
 - R7.6: The plist shall point to a node binary with an absolute, stable path: `/opt/homebrew/opt/node@24/bin/node` (`brew install node@24`). The nvm path is not used, since it includes the patch version and breaks on update.
 - R7.7: When the daemon starts, the system shall verify that the external binaries it needs (`fanficfare`, `scp`) are resolvable, and log which one is missing if any is not — so that a badly built PATH is detected at startup and not as a confusing download failure.
 
+### R8 — Rate-limit deferral (added 2026-11-23)
+
+AO3 can answer `429 Too Many Requests` for hours, longer than the 30-minute window, which left the bot dropping every request. Tracking: [`odd/tasks/ao3-rate-limit-deferral.md`](../../../odd/tasks/ao3-rate-limit-deferral.md).
+
+- R8.1: When an item's backoff ladder or window runs out and its last failure is a download rate limit (FanFicFare reports `429` / `Too Many Requests`), the system shall keep the item as **deferred**, keeping its spool, instead of giving up.
+- R8.2: When an item becomes deferred, the system shall notify the owner exactly once that FanFicFare is having trouble with AO3 and when it will try again.
+- R8.3: While an item is deferred, the system shall retry it every configured deferral delay (`deferredRetryMs`, by default 2 hours), without notifying failed attempts, and notify the delivery as in R6.2.
+- R8.4: When a deferred item's next attempt would land later than the configured limit (`deferredGiveUpAfterMs`, by default 24 hours) after its first enqueue, the system shall give up on it, delete its spool and notify the owner with the last error.
+- R8.5: While at least one item is deferred, when a new link arrives, the system shall not download it: it shall enqueue it as deferred at stage `download`, scheduled with the earliest deferred item's next attempt, and tell the owner when it will be tried.
+- R8.6: When a deferred retry fails with the rate limit again, the system shall not send to AO3 any other deferred download that became due at or before that failure; those wait another deferral delay.
+- R8.7: Only rate-limit failures shall be deferred; every other failure keeps R4.1. A deferred item stays deferred through its upload stage.
+- R8.8: The deferred state shall be persisted with the item (R2), so it survives a restart.
+
 ## Out of scope for this feature
 
 - "Follow" button and chapter tracking (feature 4).
@@ -91,3 +104,7 @@ R2's persistence promise is useless if the daemon dies and does not come back. T
 5. **Given** AO3 returns 429, **when** the download fails, **then** the request is enqueued at stage `download` and the retry attempts the download again.
 6. **Given** the SSH key is misconfigured, **when** launching scp fails, **then** the request is **not** enqueued and the bot reports the configuration error.
 7. **Given** the queue is empty, **when** the daemon is idle, **then** there is no active timer and no periodic work.
+8. **Given** AO3 keeps answering 429, **when** an item's 30-minute window runs out, **then** it stays in the queue as deferred, the owner is told once, and it is retried 2 hours later (R8.1–R8.3).
+9. **Given** a deferred item, **when** its next attempt would be more than 24 hours after its first enqueue, **then** it is abandoned, its spool deleted, and the owner told the last error (R8.4).
+10. **Given** a deferred item in the queue, **when** the owner shares a new link, **then** AO3 is not contacted and the owner is told when it will be tried (R8.5).
+11. **Given** a download that fails with a timeout, **when** its 30-minute window runs out, **then** it is abandoned as before, not deferred (R8.7).

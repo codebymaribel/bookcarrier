@@ -258,7 +258,7 @@ Cada fallo se clasifica como **transitorio** o **permanente**:
 Un pedido en cola recuerda su **etapa**. Si falló la descarga, el reintento vuelve a descargar; si solo falló la copia a la Kindle, el EPUB ya está en el spool y el reintento solo corre `scp`: no se vuelve a pedir nada a AO3.
 
 - **Backoff:** los reintentos se hacen con 1, 2, 4, 8 y 15 minutos de separación (acumulado: 1, 3, 7, 15, 30).
-- **Abandono:** 30 minutos después de encolarse por primera vez, el pedido se abandona y su EPUB se borra del spool.
+- **Abandono:** 30 minutos después de encolarse por primera vez, el pedido se abandona y su EPUB se borra del spool — salvo cuando AO3 sigue limitando pedidos (`429`), ver [más abajo](#cuando-ao3-sigue-limitando-pedidos-429).
 - **Avisos:** un mensaje al encolarse, uno al entregarse (con el título) y uno al abandonarse (con el último error). Los intentos fallidos intermedios no generan avisos.
 - **Persistencia:** la cola vive en `~/.bookcarrier/queue.json` (escrita de forma atómica) y los EPUB en `~/.bookcarrier/spool/`. Después de un reinicio, el demonio restaura la cola, reprograma los reintentos y borra del spool los archivos que ningún pedido en cola referencia. Si el archivo de la cola no se puede leer, se conserva aparte como `queue.json.corrupt-<timestamp>`, el demonio arranca con la cola vacía y te avisa.
 - **Sin trabajo en reposo:** con la cola vacía no hay ningún timer; si no, un único timer apunta al próximo reintento pendiente.
@@ -307,7 +307,7 @@ src/
   index.ts        punto de entrada: carga la config, verifica binarios e inicia el long polling
   daemon.ts       arranque: restaura la cola, reconcilia el spool, arma el timer de reintentos
   bot.ts          filtro de dueño + el flujo de cada pedido (orquestación)
-  errors.ts       clasificación de fallos en transitorios y permanentes
+  errors.ts       clasificación de fallos en transitorios y permanentes, detección del límite de AO3 (429)
   binaries.ts     verificación de arranque de que fanficfare, scp y ssh estén en el PATH
   queue/          cola de reintentos: archivo de estado, backoff, spool, timer único
   messages.ts     todos los textos al dueño, y el mapeo error → mensaje
@@ -349,7 +349,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | #   | Feature                                                       | Estado          |
 | --- | ------------------------------------------------------------- | --------------- |
 | 1   | Enviar un fic de AO3 desde un link                            | ✅ Hecha        |
-| 2   | Cola de reintentos + arranque al iniciar sesión con launchd   | ✅ Hecha        |
+| 2   | Cola de reintentos + arranque al iniciar sesión con launchd (+ diferimiento ante el `429` de AO3) | ✅ Hecha        |
 | 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)            | ✅ Hecha        |
 | 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | ✅ Hecha        |
 | 5   | Botón “Seguir” y seguimiento de capítulos                     | Planeada        |
