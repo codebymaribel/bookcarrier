@@ -3,5 +3,6 @@
  * Code outside `src/fanfic/` imports only from here.
  */
 export { downloadEpub, FANFICFARE_BIN } from "./downloader.js";
+export { type FicMeta, type FicStatus, parseFicMeta } from "./fic-meta.js";
 export { messages } from "./messages.js";
 export { createPipeline, type Pipeline, type PipelineDeps, type Send } from "./pipeline.js";

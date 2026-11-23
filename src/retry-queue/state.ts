@@ -1,6 +1,4 @@
-import { mkdir, readFile, rename } from "node:fs/promises";
-import { dirname } from "node:path";
-import writeFileAtomic from "write-file-atomic";
+import { createJsonFileStore, type JsonFileStore, type JsonReadResult } from "../shared/index.js";
 
 export type Stage = "download" | "upload";
 
@@ -37,16 +35,10 @@ export type QueueState = {
   items: QueueItem[];
 };
 
-export type ReadResult = {
-  state: QueueState;
-  /** Set when the file existed but was unreadable: where it was moved to (R2.5). */
-  corruptBackup?: string;
-};
+/** `corruptBackup` is set when the file existed but was unreadable: where it was moved to (R2.5). */
+export type ReadResult = JsonReadResult<QueueState>;
 
-export type StateStore = {
-  read(): Promise<ReadResult>;
-  write(state: QueueState): Promise<void>;
-};
+export type StateStore = JsonFileStore<QueueState>;
 
 export function emptyState(): QueueState {
   return { version: 1, items: [] };
@@ -75,57 +67,21 @@ function isQueueItem(value: unknown): value is QueueItem {
   );
 }
 
-/** Parses the file's text; `undefined` when it is not JSON or not a version-1 state. */
-function parseState(text: string): QueueState | undefined {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return undefined;
-  }
+/** Validates the parsed JSON; `undefined` when it is not a version-1 state. */
+function parseState(raw: unknown): QueueState | undefined {
   if (!isRecord(raw) || raw["version"] !== 1 || !Array.isArray(raw["items"])) return undefined;
   if (!raw["items"].every(isQueueItem)) return undefined;
   return { version: 1, items: raw["items"] };
 }
 
 /**
- * Reads and writes the queue's JSON file.
+ * Reads and writes the queue's JSON file, through {@link createJsonFileStore}.
  *
  * - `read()`: a missing file is an empty queue (R2.4). A file that is not valid JSON, or not a
- *   version-1 state, is moved aside to `<path>.corrupt-<now>` so it can be inspected, and the
- *   result says so in `corruptBackup`, so the caller can notify the owner (R2.5). Other read errors
- *   (permissions, I/O) are thrown: silently starting empty would drop the owner's requests.
- * - `write()`: atomic with write-file-atomic (temp file in the same directory + fsync + rename),
- *   so a crash never leaves a truncated file (R2.2). Writes are chained, so two concurrent calls run
- *   in order and the last one wins; a failed write rejects its caller without breaking the chain.
+ *   version-1 state, is moved aside to `<path>.corrupt-<now>` and reported in `corruptBackup`, so
+ *   the caller can notify the owner (R2.5). Other read errors are thrown.
+ * - `write()`: atomic and chained (R2.2); see {@link createJsonFileStore}.
  */
 export function createStateStore(path: string, now: () => number = Date.now): StateStore {
-  let chain: Promise<unknown> = Promise.resolve();
-
-  return {
-    async read() {
-      let text: string;
-      try {
-        text = await readFile(path, "utf8");
-      } catch (err) {
-        if (isRecord(err) && err["code"] === "ENOENT") return { state: emptyState() };
-        throw err;
-      }
-      const state = parseState(text);
-      if (state !== undefined) return { state };
-      const corruptBackup = `${path}.corrupt-${now()}`;
-      await rename(path, corruptBackup);
-      return { state: emptyState(), corruptBackup };
-    },
-
-    write(state) {
-      const run = async (): Promise<void> => {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFileAtomic(path, `${JSON.stringify(state, null, 2)}\n`);
-      };
-      const result = chain.then(run, run);
-      chain = result.catch(() => undefined);
-      return result;
-    },
-  };
+  return createJsonFileStore(path, parseState, emptyState, now);
 }

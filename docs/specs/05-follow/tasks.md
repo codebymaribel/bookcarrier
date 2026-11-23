@@ -12,14 +12,14 @@ The order follows the dependencies: pure helpers first, then the stores, then th
 
 ## Tasks
 
-- [ ] **T1 — `src/fanfic/fic-meta.ts`: `FicMeta` and `parseFicMeta`** (test `src/fanfic/fic-meta.test.ts`). Pure, no I/O; exported via `src/fanfic/index.ts`.
+- [x] **T1 — `src/fanfic/fic-meta.ts`: `FicMeta` and `parseFicMeta`** (test `src/fanfic/fic-meta.test.ts`). Pure, no I/O; exported via `src/fanfic/index.ts`.
   - Test: `numChapters` `12`, `"12"` and `"1,204"` → `12`, `12`, `1204` (R2.2).
   - Test: `numChapters` `0`, `-3`, `"abc"`, `1.5`, missing, and a non-object input → `undefined` (R2.2, R2.3).
   - Test: `status` `"Completed"` → `completed`, `"In-Progress"` → `in-progress`, `"Abandoned"` or missing → `unknown` (R2.4).
   - Test: `workId` and `url` come from the arguments, not from the JSON (even when the JSON has a different `storyId`).
   - Test: missing `title`/`author` → the fallback title and `""`.
 
-- [ ] **T2 — `src/shared/json-file.ts`: extract the atomic JSON store from `src/retry-queue/state.ts`.** No behavior change for the queue.
+- [x] **T2 — `src/shared/json-file.ts`: extract the atomic JSON store from `src/retry-queue/state.ts`.** No behavior change for the queue.
   - `createJsonFileStore<T>(path, parse, empty, now)`; `src/retry-queue/state.ts` keeps its exported interface and wraps it.
   - Test (`src/shared/json-file.test.ts`): write then read returns the same state; a missing file → `empty()` with no backup; invalid JSON, wrong `version` or `parse` returning `undefined` → the file is moved to `<path>.corrupt-<now>`, `corruptBackup` is returned and the state is `empty()` (R5.2).
   - Test: a write that fails leaves the previous file intact (atomic write).
