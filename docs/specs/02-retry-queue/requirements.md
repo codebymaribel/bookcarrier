@@ -89,9 +89,9 @@ AO3 can answer `429 Too Many Requests` for hours, longer than the 30-minute wind
 
 ## Out of scope for this feature
 
-- "Follow" button and chapter tracking (feature 4).
-- Daily update check (feature 5).
-- `/list`, `/drop`, `/status` commands (feature 6) — although `/status` will read the queue we build here.
+- "Follow" button and chapter tracking (feature 5).
+- Daily update check (feature 6).
+- `/list`, `/drop`, `/status` commands (feature 7) — although `/status` will read the queue we build here.
 - Migrating state to SQLite (only if JSON becomes a problem).
 - Log rotation.
 

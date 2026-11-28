@@ -11,7 +11,7 @@ An AO3 link shared with the Telegram bot ends up as an EPUB on the Kindle, with 
 - One link per message.
 - Messages are processed **one at a time**, in arrival order (grammY's default with long polling). A second link sent while the first is downloading is acknowledged only when the first finishes. Feature 2's queue lifts this limit. (Decided 2026-11-18; it also gives, for free, the pause between requests to AO3 that the principles ask for.)
 - A single recipient (the owner's Telegram ID).
-- No tracking of new chapters (feature 3) and no retry queue (feature 2).
+- No tracking of new chapters (feature 5) and no retry queue (feature 2).
 
 ## Requirements (EARS)
 
@@ -78,8 +78,8 @@ An AO3 link shared with the Telegram bot ends up as an EPUB on the Kindle, with 
 ## Out of scope for this feature
 
 - Automatic retries if the Kindle is unreachable (feature 2).
-- "Follow" button and chapter tracking (feature 3).
-- `/list`, `/drop`, `/status` commands (feature 5).
+- "Follow" button and chapter tracking (feature 5).
+- `/list`, `/drop`, `/status` commands (feature 7).
 - Automatic startup with launchd (project non-functional requirement, solved at the end or together with the queue).
 
 ## Acceptance criteria (Given/When/Then)

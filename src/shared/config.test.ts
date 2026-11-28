@@ -180,6 +180,23 @@ describe("loadConfig", () => {
     ]);
   });
 
+  it("followsPath: absent → ~/.bookcarrier/follows.json; ~ is expanded (feature 5, R7.1)", async () => {
+    const config = await loadConfig(await writeConfig(valid));
+    expect(config.followsPath).toBe(join(homedir(), ".bookcarrier", "follows.json"));
+    const custom = await loadConfig(await writeConfig({ ...valid, followsPath: "~/x.json" }));
+    expect(custom.followsPath).toBe(join(homedir(), "x.json"));
+  });
+
+  it.each(["", 3])("rejects followsPath = %j, together with other problems (R7.2)", async (followsPath) => {
+    const problems = await problemsOf(
+      loadConfig(await writeConfig({ ...valid, followsPath, queuePath: "" })),
+    );
+    expect(problems).toEqual([
+      '"queuePath" is optional, but if present it must be a non-empty string',
+      '"followsPath" is optional, but if present it must be a non-empty string',
+    ]);
+  });
+
   it("throws ConfigError if the file does not exist", async () => {
     const problems = await problemsOf(loadConfig(join(dir, "does-not-exist.json")));
     expect(problems[0]).toMatch(/could not read .*\(ENOENT\)/);

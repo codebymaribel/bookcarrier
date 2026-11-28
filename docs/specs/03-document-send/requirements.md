@@ -126,7 +126,7 @@ A file (EPUB, MOBI or PDF) sent to the Telegram bot ends up on the Kindle, in th
 - Several documents in one message (albums).
 - Using the caption (as a title or a name).
 - Converting between formats or editing metadata.
-- "Follow" button and chapter tracking (now feature 4), daily update check (feature 5), `/list`, `/drop`, `/status` commands (feature 6).
+- "Follow" button and chapter tracking (now feature 5), daily update check (feature 6), `/list`, `/drop`, `/status` commands (feature 7).
 
 ## Acceptance criteria (Given/When/Then)
 

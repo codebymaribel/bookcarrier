@@ -57,6 +57,54 @@ describe("readState", () => {
     expect((await createStateStore(path, () => 7).read()).corruptBackup).toBe(join(dir, "queue.json.corrupt-7"));
   });
 
+  const meta = {
+    workId: "1",
+    url: "https://archiveofourown.org/works/1",
+    title: "Title",
+    author: "A",
+    chapters: 12,
+    status: "in-progress",
+  } as const;
+
+  it("an item with meta round-trips through write and read (feature 5, R2.5)", async () => {
+    const store = createStateStore(path);
+    const state: QueueState = { version: 1, items: [{ ...item("1"), meta }] };
+    await store.write(state);
+    expect(await store.read()).toEqual({ state });
+  });
+
+  it("an item carrying both deferred and meta round-trips with both intact (#7)", async () => {
+    const store = createStateStore(path);
+    const state: QueueState = { version: 1, items: [{ ...item("1"), deferred: true, meta }] };
+    await store.write(state);
+    expect(await store.read()).toEqual({ state });
+  });
+
+  it("a pre-feature file (items without meta) loads with meta undefined and no backup (R2.6)", async () => {
+    await writeFile(path, JSON.stringify(stateWith("1")));
+    const result = await createStateStore(path).read();
+    expect(result.corruptBackup).toBeUndefined();
+    expect(result.state.items[0]?.meta).toBeUndefined();
+    expect(await readdir(dir)).toEqual(["queue.json"]);
+  });
+
+  it("an item with an invalid meta loads with the meta dropped and the item kept", async () => {
+    const bad = [
+      { ...meta, chapters: 0 },
+      { ...meta, status: "weird" },
+      { ...meta, title: 3 },
+      "nope",
+      null,
+    ];
+    for (const invalid of bad) {
+      await writeFile(path, JSON.stringify({ version: 1, items: [{ ...item("1"), meta: invalid }, item("2")] }));
+      const result = await createStateStore(path).read();
+      expect(result.corruptBackup).toBeUndefined();
+      expect(result.state).toEqual(stateWith("1", "2"));
+    }
+    expect(await readdir(dir)).toEqual(["queue.json"]);
+  });
+
   it("corrupt JSON → renamed to .corrupt-<ts>, empty state, and signalled (R2.5)", async () => {
     await writeFile(path, "{ not json");
     const result = await createStateStore(path, () => 1_700_000_000_000).read();

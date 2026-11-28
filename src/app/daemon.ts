@@ -6,7 +6,14 @@ import {
   type PipelineDeps,
   type Send,
 } from "../fanfic/index.js";
-import type { Logger, ResolvedConfig } from "../shared/index.js";
+import {
+  createFollows,
+  emptyFollowsState,
+  type Follows,
+  followsMessages,
+  parseFollowsState,
+} from "../follows/index.js";
+import { createJsonFileStore, type Logger, type ResolvedConfig } from "../shared/index.js";
 import {
   createQueue,
   createScheduler,
@@ -20,6 +27,8 @@ import { uploadToKindle } from "../kindle/index.js";
 
 export type Daemon = {
   queue: Queue;
+  /** Feature 5: the followed fics, shared by the pipeline and the bot's Follow / Unfollow buttons. */
+  follows: Follows;
   pipeline: Pipeline;
   scheduler: Scheduler;
   /** Arms the retry timer and sends the startup notices. Call it once the bot can send messages. */
@@ -40,6 +49,8 @@ export type DaemonOptions = {
  * Wires the retry queue at startup (T9):
  * 1. reads the persisted state: missing → empty (R2.4); corrupt → empty, moved aside, owner told
  *    once `start()` runs (R2.5);
+ *    The follows file is read the same way (feature 5, R5.2): corrupt → empty, moved aside, error
+ *    logged naming the backup, owner told once `start()` runs;
  * 2. reconciles the spool, deleting EPUBs no restored item references (R5.3);
  * 3. builds the queue, the pipeline and the scheduler, with every queue change re-arming the timer.
  *
@@ -53,6 +64,15 @@ export async function createDaemon(config: ResolvedConfig, options: DaemonOption
   if (corruptBackup !== undefined) {
     logger.error("the queue file was unreadable; starting with an empty queue", { corruptBackup });
   }
+
+  const followsStore = createJsonFileStore(config.followsPath, parseFollowsState, emptyFollowsState);
+  const { state: followsState, corruptBackup: followsCorruptBackup } = await followsStore.read();
+  if (followsCorruptBackup !== undefined) {
+    logger.error("the follows file was unreadable; starting with no followed fics", {
+      corruptBackup: followsCorruptBackup,
+    });
+  }
+  const follows = createFollows(followsStore, followsState);
 
   const spool = createSpool(config.spoolDir);
   const removed = await spool.reconcile(state.items);
@@ -76,6 +96,7 @@ export async function createDaemon(config: ResolvedConfig, options: DaemonOption
     queue,
     newId: randomUUID,
     logger,
+    follows,
   });
 
   scheduler = createScheduler({
@@ -87,12 +108,18 @@ export async function createDaemon(config: ResolvedConfig, options: DaemonOption
 
   return {
     queue,
+    follows,
     pipeline,
     scheduler: timer,
     start() {
       logger.info("retry queue restored", { items: state.items.length });
       if (corruptBackup !== undefined) {
         notify(messages.queueFileCorrupt(corruptBackup)).catch((err: unknown) => {
+          logger.warn("could not send a Telegram message", { error: err });
+        });
+      }
+      if (followsCorruptBackup !== undefined) {
+        notify(followsMessages.followsFileCorrupt(followsCorruptBackup)).catch((err: unknown) => {
           logger.warn("could not send a Telegram message", { error: err });
         });
       }

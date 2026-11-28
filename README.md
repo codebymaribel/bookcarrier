@@ -19,6 +19,7 @@ phone ──send file──▶ Telegram bot ──▶ Bookcarrier ──getFile�
 - Accepts an AO3 work link shared to the bot, even when the share menu sends the title and the URL together (Downloads the fic as an EPUB with [FanFicFare](https://github.com/JimmXinu/FanFicFare), named `<work-id>-<title>.epub` so the name is stable.).
 - Accepts a document sent to the bot as a file (EPUB, MOBI or PDF by default, up to 20 MB) and copies it to its folder on the Kindle (`/mnt/us/documents/books/` by default, not the fics' folder). If a file with that name is already there, it asks whether to replace it.
 - Copies it to the Kindle with `scp`.
+- On an **in-progress** AO3 fic, the delivery message has a **Follow** button: it stores the fic with the number of chapters delivered, so the daily check (feature 6) knows where to look from. **Unfollow** stops following it, and a followed fic that becomes complete is unfollowed on its own. This feature does not ask AO3 for new chapters.
 - Tells you, in the chat, whether it was delivered or exactly what failed.
 - If the failure is transient (AO3 down or rate-limiting, the Kindle's Wi-Fi asleep), it **keeps the request in a persistent queue and retries it on its own** for up to 30 minutes; if AO3 is still rate-limiting (`429`) by then, it keeps the request and tries again every 2 hours for up to 24 hours (see [Retry queue](#retry-queue)). Documents are **not** retried: if the Kindle is unreachable, you send the file again.
 
@@ -76,6 +77,7 @@ Then edit it:
 | `uploadTimeoutMs`      |          | `120000`                                                                                                        | Maximum time for the copy (2 min).                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `sshConnectTimeoutSec` |          | `10`                                                                                                            | SSH `ConnectTimeout`.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `queuePath`            |          | `~/.bookcarrier/queue.json`                                                                                     | Retry queue state file. A leading `~` is expanded.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `followsPath`          |          | `~/.bookcarrier/follows.json` | Followed fics state file (also keeps the last 10 delivered fics that offered Follow). A leading `~` is expanded. |
 | `spoolDir`             |          | `~/.bookcarrier/spool`                                                                                          | Where downloaded EPUBs wait for delivery. Never the system temp folder. `~` is expanded.                                                                                                                                                                                                                                                                                                                                                                                    |
 | `giveUpAfterMs`        |          | `1800000`                                                                                                       | Give up on a queued request this long after it was first enqueued (30 min).                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `retryBackoffMinutes`  |          | `[1, 2, 4, 8, 15]`                                                                                              | Wait before each retry, in minutes. A non-empty list of positive integers.                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -227,6 +229,22 @@ Share (or paste) an AO3 work link to the bot, or send it a document as a file. I
 
 If a message contains several AO3 links, only the first one is used.
 
+Following a fic (in-progress AO3 fics only; documents are never followed):
+
+| This happens | The bot answers |
+| --- | --- |
+| An in-progress fic is delivered | `Delivered “Title” to your Kindle.` with a **Follow** button. |
+| → you tap **Follow** | `Following “Title” — 12 chapters delivered.` and the button becomes **Unfollow**. |
+| → you tap **Unfollow** | `OK, I'm no longer following “Title”.` and the button disappears. |
+| You send the link of a followed fic again | `Delivered “Title” to your Kindle. I updated your follow: now 14 chapters.` with an **Unfollow** button: the stored chapters and status update on their own. |
+| A fic that is already complete is delivered | `Delivered “Title” to your Kindle.` with **no** button: complete fics are not followed. |
+| You send a followed fic again and it is complete now | `Delivered “Title” to your Kindle. It's complete now, so I'm no longer following it.` It is unfollowed on its own, with no button. |
+| → you tap an old **Follow** button, after 10 newer fics were delivered (or the fic is unknown) | `I don't have that fic any more. Send me its link again to follow it.` Nothing is stored. |
+| FanFicFare leaves no usable chapter metadata | The fic is still delivered, with **no** **Follow** button, and a warning is logged. |
+| The followed fics file is unreadable at startup | `The file with your followed fics was unreadable, so I started with none followed. The old file was kept as <path> so it can be inspected.` (the old file is `follows.json.corrupt-<timestamp>`). |
+
+A fic's **Follow** button keeps working for the last 10 delivered fics, even across a daemon restart. Followed fics do not count towards that limit. A request that was deferred by AO3's rate limit offers **Follow** too, when it is finally delivered.
+
 For a document (EPUB, MOBI, PDF, as a file; the caption is ignored):
 
 | You send                                                          | The bot answers                                                                                                                           |
@@ -279,7 +297,8 @@ Both limits are configurable (`deferredRetryMs`, `deferredGiveUpAfterMs`).
 2. `extractWorkLink` finds the AO3 URL inside the text (checking the exact hostname) and rebuilds the canonical URL `https://archiveofourown.org/works/<id>`.
 3. `downloadEpub` runs `fanficfare` as a subprocess in an empty folder of the spool and picks up the single `.epub` it leaves there. FanFicFare itself names and sanitizes the file.
 4. `uploadToKindle` checks the SSH key first (the same criterion SSH uses), then runs `scp`.
-5. The bot replies. On success the EPUB is deleted from the spool; on a transient failure the request goes into the retry queue; on a permanent one the error is reported and the EPUB deleted.
+5. Next to the EPUB, `fanficfare` writes `<name>.epub.json` (`--json-meta-file`). `parseFicMeta` reads the published chapter count (`numChapters`) and the status (`Completed` / `In-Progress`) from it, with no extra request to AO3. If the JSON is missing or unusable, the fic is still delivered, just without a **Follow** button. Once the fic is delivered, `follows.onDelivered` decides whether to offer **Follow**, update a followed fic or unfollow it (`follows.json`). A request deferred by AO3's rate limit reads this metadata once it is finally downloaded, so it offers **Follow** when it is delivered.
+6. The bot replies. On success the EPUB is deleted from the spool; on a transient failure the request goes into the retry queue; on a permanent one the error is reported and the EPUB deleted.
 
 For a document:
 
@@ -311,8 +330,12 @@ src/              one folder per bounded context; each exposes an index.ts, the 
     pipeline.ts     the request and retry flow (orchestration), one operation at a time
     ao3-link.ts     finds and validates the AO3 work link in a message
     downloader.ts   FanFicFare subprocess wrapper
+    fic-meta.ts     reads a fic's chapter count and status from FanFicFare's metadata file
     failure.ts      transient vs permanent failure classification, AO3 rate-limit (429) detection
     messages.ts     every text about fics, and their error → message mapping
+  follows/        followed fics
+    follows.ts      Follow, Unfollow, the last 10 delivered fics and the follows.json state
+    messages.ts     every text about following fics, and the corrupt-follows-file notice
   documents/      documents sent to the bot as files
     flow.ts         the document flow (orchestration), including the Replace/Cancel question
     document.ts     document validation and file name sanitization
@@ -330,6 +353,7 @@ src/              one folder per bounded context; each exposes an index.ts, the 
     ssh.ts          SSH options and key check shared by scp and ssh; existence check on the Kindle
     messages.ts     the Kindle configuration-problem text
   shared/         config.ts (loads and validates ~/.bookcarrier/config.json), logger.ts,
+                  json-file.ts (atomic, versioned JSON file read/write shared by the queue and the follows),
                   subprocess.ts (helpers for the subprocess wrappers), messages.ts (generic text)
 test/             Vitest tests of bookcarrierctl, the launchd plist and the SwiftBar template
 docs/specs/       the specifications (see below)
@@ -361,7 +385,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 | 2   | Retry queue + start at login with launchd (+ deferral on AO3 `429`) | ✅ Done      |
 | 3   | Send a document as a file (EPUB, MOBI, PDF)           | ✅ Done      |
 | 4   | Control panel: `bookcarrierctl` + menu bar (SwiftBar) | ✅ Done      |
-| 5   | “Follow” button and chapter tracking                  | Planned      |
+| 5   | “Follow” button and chapter tracking                  | ✅ Done      |
 | 6   | Daily check for new chapters                          | Planned      |
 | 7   | `/list`, `/drop`, `/status` commands                  | Planned      |
 

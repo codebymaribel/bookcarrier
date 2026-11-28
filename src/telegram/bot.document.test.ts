@@ -20,6 +20,7 @@ const config: ResolvedConfig = {
   kindlePort: 2222,
   remotePath: "/mnt/us/documents/books/AO3/",
   queuePath: "/q/queue.json",
+  followsPath: "/q/follows.json",
   spoolDir: "/q/spool",
   giveUpAfterMs: 30 * 60_000,
   retryBackoffMinutes: [1, 2, 4, 8, 15],

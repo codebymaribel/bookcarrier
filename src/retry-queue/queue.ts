@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { FicMeta } from "../fanfic/index.js";
 import type { QueueItem, Stage, StateStore } from "./state.js";
 
 const MINUTE = 60_000;
@@ -45,6 +46,8 @@ export type EnqueueInput = {
   stage: Stage;
   epubPath?: string;
   title?: string;
+  /** Chapter metadata of the downloaded fic, for an upload-stage item (R2.5). */
+  meta?: FicMeta;
   /** The failure that caused the enqueue. */
   error: string;
   /** Enqueue straight into the deferred state, first attempt at this epoch ms (cooldown, S6). */
@@ -66,7 +69,7 @@ export type Queue = {
   /** Snapshot of the pending items. */
   items(): readonly QueueItem[];
   enqueue(input: EnqueueInput): Promise<QueueItem>;
-  promoteToUpload(id: string, epubPath: string, title: string): Promise<QueueItem>;
+  promoteToUpload(id: string, epubPath: string, title: string, meta?: FicMeta): Promise<QueueItem>;
   recordFailure(id: string, error: string, options?: FailureOptions): Promise<FailureOutcome>;
   remove(id: string): Promise<void>;
   /** While any item is deferred (AO3 cooling down): the earliest deferred next attempt (S6). */
@@ -133,6 +136,7 @@ export function createQueue(options: QueueOptions): Queue {
         stage: input.stage,
         ...(input.epubPath !== undefined && { epubPath: input.epubPath }),
         ...(input.title !== undefined && { title: input.title }),
+        ...(input.meta !== undefined && { meta: input.meta }),
         attempts: 0,
         firstQueuedAt: at,
         nextAttemptAt: input.deferredUntil ?? at + (backoffFor(0, backoffMs) ?? 0),
@@ -144,8 +148,14 @@ export function createQueue(options: QueueOptions): Queue {
       return { ...item };
     },
 
-    async promoteToUpload(id, epubPath, title) {
-      const next: QueueItem = { ...find(id), stage: "upload", epubPath, title };
+    async promoteToUpload(id, epubPath, title, meta) {
+      const next: QueueItem = {
+        ...find(id),
+        stage: "upload",
+        epubPath,
+        title,
+        ...(meta !== undefined && { meta }),
+      };
       replace(next);
       await commit();
       return { ...next };

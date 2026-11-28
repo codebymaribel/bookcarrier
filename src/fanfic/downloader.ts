@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { appendTail, summarizeStderr } from "../shared/index.js";
+import { type FicMeta, parseFicMeta } from "./fic-meta.js";
 
 export const FANFICFARE_BIN = "fanficfare";
 
@@ -11,8 +12,22 @@ export const FANFICFARE_BIN = "fanficfare";
  */
 const OUTPUT_FILENAME_ARG = "output_filename=${storyId}-${title}${formatext}";
 
-export type DownloadOptions = { timeoutMs: number };
-export type DownloadResult = { filePath: string; title: string };
+export type DownloadOptions = {
+  timeoutMs: number;
+  /**
+   * AO3 work id of the link being downloaded (feature 5). With it, the chapter metadata FanFicFare
+   * writes is read into `meta`; without it the metadata file is ignored.
+   */
+  workId?: string;
+};
+export type DownloadResult = {
+  filePath: string;
+  title: string;
+  /** Chapter metadata (R2.1); absent when it could not be read, see `metaWarning` (R2.3). */
+  meta?: FicMeta;
+  /** Why `meta` is absent, naming the work id; for the caller to log. Never fails the download. */
+  metaWarning?: string;
+};
 
 export type DownloadFailureReason = "exit-code" | "timeout" | "no-file" | "multiple-files";
 
@@ -79,10 +94,30 @@ async function findEpub(outDir: string): Promise<DownloadResult> {
 }
 
 /**
+ * Reads `<epub>.json`, FanFicFare's `--json-meta-file` output (R2.1). Never throws: any problem
+ * (missing, unreadable, invalid JSON, no usable `numChapters`) becomes a `metaWarning` (R2.3).
+ */
+async function readMeta(result: DownloadResult, url: string, workId: string): Promise<DownloadResult> {
+  const warn = (why: string): DownloadResult => ({
+    ...result,
+    metaWarning: `no chapter metadata for work ${workId}: ${why}`,
+  });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(`${result.filePath}.json`, "utf8"));
+  } catch (err) {
+    return warn(err instanceof Error ? err.message : String(err));
+  }
+  const meta = parseFicMeta(raw, { workId, url, fallbackTitle: result.title });
+  return meta === undefined ? warn("invalid or missing numChapters") : { ...result, meta };
+}
+
+/**
  * Downloads a fic as EPUB with FanFicFare, as an async subprocess (R3.1).
  *
  * `outDir` must be an empty directory exclusive to this request. FanFicFare names the file itself;
- * afterwards we pick up the single `.epub` it left there instead of predicting the name.
+ * afterwards we pick up the single `.epub` it left there instead of predicting the name. With
+ * `opts.workId` the `<epub>.json` metadata is read too; its failure never fails the download (R2.3).
  *
  * Rejects with:
  * - {@link DownloadLaunchError} if the process could not be launched (R3.5), checked separately
@@ -99,7 +134,7 @@ export function downloadEpub(
     // stdin closed + --non-interactive (R3.6): a prompt fails fast instead of waiting for the timeout.
     const child = spawn(
       FANFICFARE_BIN,
-      [url, "-f", "epub", "--non-interactive", "-o", OUTPUT_FILENAME_ARG],
+      [url, "-f", "epub", "--non-interactive", "-o", OUTPUT_FILENAME_ARG, "--json-meta-file"],
       { cwd: outDir, stdio: ["ignore", "pipe", "pipe"] },
     );
 
@@ -149,10 +184,12 @@ export function downloadEpub(
         return;
       }
       clearTimeout(timer);
-      findEpub(outDir).then(
-        (result) => finish(() => resolve(result)),
-        (err: unknown) => finish(() => reject(err)),
-      );
+      findEpub(outDir)
+        .then((found) => (opts.workId === undefined ? found : readMeta(found, url, opts.workId)))
+        .then(
+          (result) => finish(() => resolve(result)),
+          (err: unknown) => finish(() => reject(err)),
+        );
     });
   });
 }

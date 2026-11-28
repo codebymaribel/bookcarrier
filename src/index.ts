@@ -40,10 +40,10 @@ async function main(): Promise<void> {
   // Retries and startup notices go to the owner through the bot, which needs the pipeline first:
   // the notifier looks the bot up lazily, and nothing is sent before `daemon.start()`.
   let bot: Bot | undefined;
-  const notify: Send = (text) =>
-    bot === undefined ? Promise.resolve() : notifyOwner(bot, config.ownerId)(text);
+  const notify: Send = (text, action) =>
+    bot === undefined ? Promise.resolve() : notifyOwner(bot, config.ownerId)(text, action);
   const daemon = await createDaemon(config, { logger, notify });
-  bot = createBot(config, daemon.pipeline);
+  bot = createBot(config, daemon.pipeline, undefined, undefined, daemon.follows);
 
   // grammY's default would stop the bot on an error thrown by a handler. The request handler never
   // throws, so this is a safety net: log it and keep serving the owner.

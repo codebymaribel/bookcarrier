@@ -13,7 +13,7 @@ const BOOKS = "/mnt/us/documents/books/";
 const config: ResolvedConfig = {
   telegramToken: TOKEN, ownerId: 42, kindleUser: "root", kindleHost: "192.0.2.1", sshKeyPath: "/nonexistent/key",
   downloadTimeoutMs: 1000, uploadTimeoutMs: 1000, sshConnectTimeoutSec: 1, kindlePort: 2222,
-  remotePath: "/mnt/us/documents/books/AO3/", queuePath: "/q/q.json", spoolDir: "/q/spool",
+  remotePath: "/mnt/us/documents/books/AO3/", queuePath: "/q/q.json", followsPath: "/q/f.json", spoolDir: "/q/spool",
   giveUpAfterMs: 1800000, retryBackoffMinutes: [1], deferredRetryMs: 7200000, deferredGiveUpAfterMs: 86400000,
   documentFolders: new Map([["epub", BOOKS], ["mobi", BOOKS], ["pdf", BOOKS]]),
 };
