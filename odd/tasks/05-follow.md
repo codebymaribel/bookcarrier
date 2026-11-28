@@ -13,12 +13,12 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - [x] T2 owner review of requirements (Open questions Q1, Q2) — S1 — owner — resolved 2026-11-22 (L6, L7)
 - [x] T3 design.md — S1 — inline — approved 2026-11-23 (L11)
 - [x] T4 tasks.md (implementation tasks, each with its test) — S1 — inline — written 2026-11-23, pending owner review
-- [ ] I1–I11 implementation: docs/specs/05-follow/tasks.md T1–T11 — T1, T2 done (0193871); T3 done (5c0ac1d); T4–T6 done (a2ab8bb); T7–T10 done (d0c5012); T11 done (docs commit); manual verification pending (owner)
-- [ ] P0 port spec update: design.md, tasks.md, research.md for the DDD layout and the 429 deferral — S1 — inline (L23)
-- [ ] P1 port T1–T6 (fic-meta, json-file, follows context, followsPath, downloader, queue meta incl. `deferred`+`meta`) — S1 — writer
-- [ ] P2 port T7–T10 (messages/keyboards, pipeline delivery action + telegram translation, taps, startup wiring) — S1 — writer
-- [ ] P3 port T11 (docs, incl. docs/fanficfare.md paths and 429 deferral description) — S1 — writer
-- [ ] P4 independent verification of the port (typecheck, full suite, differential check, R1–R8 and criteria 1–15) — S1 — verify
+- [x] I1–I11 implementation (superseded by the v2 port P0–P4): docs/specs/05-follow/tasks.md T1–T11 — T1, T2 done (0193871); T3 done (5c0ac1d); T4–T6 done (a2ab8bb); T7–T10 done (d0c5012); T11 done (docs commit); manual verification pending (owner)
+- [x] P0 port spec update: design.md, tasks.md, research.md for the DDD layout and the 429 deferral — S1 — inline (L23)
+- [x] P1 port T1–T6 (fic-meta, json-file, follows context, followsPath, downloader, queue meta incl. `deferred`+`meta`) — S1 — writer
+- [x] P2 port T7–T10 (messages/keyboards, pipeline delivery action + telegram translation, taps, startup wiring) — S1 — writer
+- [x] P3 port T11 (docs, incl. docs/fanficfare.md paths and 429 deferral description) — S1 — writer
+- [x] P4 independent verification of the port (typecheck, full suite, differential check, R1–R8 and criteria 1–15) — S1 — verify
 
 ## Log
 
@@ -47,4 +47,6 @@ Those spec files are the verbatim source of every requirement; the S# below poin
 - L23 (user decisions): "Portar sobre una rama nueva desde main"; "Contexto nuevo src/follows/"; "Acción abstracta que telegram/ traduce"; "feature/05-follow-v2; la vieja queda". Old branch feature/05-follow (eba3ef3) is the reference for code and tests.
 - L24 (evidence): port on feature/05-follow-v2: bbfe750 spec (P0), 099cc61 T1–T2 + de8a22d T3–T6 (P1), 0dd0dfb T7–T10 (P2), 53824e9 T11 docs (P3). P4 gentle-ai-verify (Risk: item 3): PASS — typecheck clean; differential check of createStateStore main vs HEAD identical in 17 cases; FanFicFare args only gain --json-meta-file; #7 deferral tests untouched; DDD import rule and no grammY in fanfic/follows hold; R1–R8 and criteria 1–15 covered. Its end-to-end probe kept as src/app/follow.e2e.test.ts (681 tests). Manual checklist still pending (owner). Slice note: branch is ~2.8k lines in 5 work-unit commits; publish as chained PRs (spec / T1–T6 / T7–T10 / docs).
 - L25 (user): AO3 still answered 429 days later (now on ?view_full_work=true). Owner chose "Creá el personal.ini con transformativeworks": ~/.fanficfare/personal.ini created with [archiveofourown.org] use_archive_transformativeworks_org:true (FanFicFare wiki ProblematicSites); documented in docs/fanficfare.md. Pending: one manual run to confirm.
+- L26 (user): transformativeworks mirror answered "403 Client Error: Forbidden for url: https://archive.transformativeworks.org/works/93369896/navigate"; personal.ini switched to use_archiveofourown_gay:true for one more try.
 - L27 (user): "sacame el commit del espejo de AO3 porque no funciono, es decir no lo usaremos" → mirror note removed from docs/fanficfare.md before commit; ~/.fanficfare/personal.ini (created in this feature, only content was the mirror setting) deleted. FanFicFare runs with its defaults again.
+- L28 (user): "listo, cerramos el feature 5. pasame el mensaje del PR" → manual verification recorded in 5e2aba6; roadmap row 5 marked done in README.md and README.es.md; feature closed. Push/PR remain the owner's.

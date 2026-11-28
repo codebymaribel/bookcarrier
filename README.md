@@ -385,7 +385,7 @@ The project is built spec-first. Each feature has its own folder in [`docs/specs
 | 2   | Retry queue + start at login with launchd (+ deferral on AO3 `429`) | ✅ Done      |
 | 3   | Send a document as a file (EPUB, MOBI, PDF)           | ✅ Done      |
 | 4   | Control panel: `bookcarrierctl` + menu bar (SwiftBar) | ✅ Done      |
-| 5   | “Follow” button and chapter tracking                  | 🚧 In progress (manual verification pending) |
+| 5   | “Follow” button and chapter tracking                  | ✅ Done      |
 | 6   | Daily check for new chapters                          | Planned      |
 | 7   | `/list`, `/drop`, `/status` commands                  | Planned      |
 

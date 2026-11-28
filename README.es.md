@@ -389,7 +389,7 @@ El proyecto se construye primero con especificaciones. Cada feature tiene su car
 | 2   | Cola de reintentos + arranque al iniciar sesión con launchd (+ diferimiento ante el `429` de AO3) | ✅ Hecha        |
 | 3   | Enviar un documento como archivo (EPUB, MOBI, PDF)            | ✅ Hecha        |
 | 4   | Panel de control: `bookcarrierctl` + barra de menú (SwiftBar) | ✅ Hecha        |
-| 5   | Botón “Follow” y seguimiento de capítulos                     | 🚧 En curso (verificación manual pendiente) |
+| 5   | Botón “Follow” y seguimiento de capítulos                     | ✅ Hecha        |
 | 6   | Revisión diaria de capítulos nuevos                           | Planeada        |
 | 7   | Comandos `/list`, `/drop`, `/status`                          | Planeada        |
 
