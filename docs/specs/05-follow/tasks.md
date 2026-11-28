@@ -90,14 +90,14 @@ The order follows the dependencies: pure helpers first, then the stores, then th
 
 ## Manual verification (before closing the feature)
 
-- [ ] One real run in an empty folder: `fanficfare <in-progress work URL> -f epub --non-interactive --json-meta-file` leaves `<storyId>-<title>.epub.json` with `numChapters` as a string (research §1). Once; on a 429, wait.
-- [ ] Send an **in-progress** fic: the delivery message has "Follow"; tap it: the reply states the chapter count, which matches AO3's "Chapters: N/…", and the button becomes "Unfollow" (acceptance criteria 1, 2).
-- [ ] Open `follows.json`: the fic is under `followed` with its work id, title, author, chapters, `in-progress` status and dates.
-- [ ] Send a **complete** fic: no button (acceptance criterion 3).
-- [ ] Restart the daemon (`bookcarrierctl restart`), then tap "Follow" on a fic delivered before the restart: it is followed (acceptance criterion 15).
-- [ ] Send the link of the followed fic again: the message says the follow was updated and shows "Unfollow" (acceptance criterion 5).
-- [ ] Tap "Unfollow": the button disappears and the fic is gone from `follows.json` (acceptance criterion 4).
-- [ ] With the Kindle asleep, send an in-progress fic; wake the Kindle: the retry delivery offers "Follow" (acceptance criterion 7).
-- [ ] Send a document (feature 3): no Follow button (acceptance criterion 11).
-- [ ] Corrupt `follows.json` by hand and restart: the daemon starts, `follows.json.corrupt-<ts>` exists and the log names it (acceptance criterion 9).
-- [ ] Check the log during all of the above: each delivery shows one FanFicFare run and no other AO3 activity (acceptance criterion 12).
+- [x] One real run in an empty folder: `fanficfare <in-progress work URL> -f epub --non-interactive --json-meta-file` leaves `<storyId>-<title>.epub.json` with `numChapters` as a string (research §1). Once; on a 429, wait.
+- [x] Send an **in-progress** fic: the delivery message has "Follow"; tap it: the reply states the chapter count, which matches AO3's "Chapters: N/…", and the button becomes "Unfollow" (acceptance criteria 1, 2).
+- [x] Open `follows.json`: the fic is under `followed` with its work id, title, author, chapters, `in-progress` status and dates.
+- [x] Send a **complete** fic: no button (acceptance criterion 3).
+- [x] Restart the daemon (`bookcarrierctl restart`), then tap "Follow" on a fic delivered before the restart: it is followed (acceptance criterion 15).
+- [x] Send the link of the followed fic again: the message says the follow was updated and shows "Unfollow" (acceptance criterion 5).
+- [x] Tap "Unfollow": the button disappears and the fic is gone from `follows.json` (acceptance criterion 4).
+- [x] With the Kindle asleep, send an in-progress fic; wake the Kindle: the retry delivery offers "Follow" (acceptance criterion 7).
+- [x] Send a document (feature 3): no Follow button (acceptance criterion 11).
+- [x] Corrupt `follows.json` by hand and restart: the daemon starts, `follows.json.corrupt-<ts>` exists and the log names it (acceptance criterion 9).
+- [x] Check the log during all of the above: each delivery shows one FanFicFare run and no other AO3 activity (acceptance criterion 12).
